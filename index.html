@@ -1,0 +1,1545 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KTV</title>
+<style>
+  :root {
+    /* 色彩：單一互動藍，其餘只有黑白灰 */
+    --primary: #0066cc; --primary-focus: #0071e3; --primary-on-dark: #2997ff;
+    --ink: #1d1d1f; --ink-80: #333333; --ink-48: #7a7a7a;
+    --muted: #7a7a7a; --muted-on-dark: #cccccc;
+    --divider: #f0f0f0; --hairline: #e0e0e0;
+    --canvas: #ffffff; --parchment: #f5f5f7; --pearl: #fafafc;
+    --tile: #272729; --tile-2: #2a2a2c; --black: #000000;
+    --chip: rgba(210, 210, 215, 0.64);
+    --r-sm: 8px; --r-md: 11px; --r-lg: 18px; --r-pill: 9999px;
+    --font: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+      "PingFang TC", "Microsoft JhengHei", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--parchment); color: var(--ink);
+    font-family: var(--font); font-size: 17px; line-height: 1.47;
+    letter-spacing: -0.374px; -webkit-font-smoothing: antialiased;
+    display: flex; flex-direction: column;
+  }
+  a { color: var(--primary); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code { font-size: 14px; background: var(--parchment); padding: 1px 6px; border-radius: 5px; }
+
+  /* 按鈕：預設是外框膠囊，.primary 是實心藍膠囊；按下縮到 0.95 */
+  button {
+    font: inherit; font-size: 14px; letter-spacing: -0.224px; line-height: 1.29;
+    color: var(--primary); background: transparent;
+    border: 1px solid var(--primary); border-radius: var(--r-pill);
+    padding: 8px 16px; cursor: pointer; white-space: nowrap;
+    transition: transform .12s ease;
+  }
+  button:active:not(:disabled) { transform: scale(0.95); }
+  button:focus-visible { outline: 2px solid var(--primary-focus); outline-offset: 2px; }
+  button:disabled { opacity: .35; cursor: not-allowed; }
+  button.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  button.small { padding: 5px 12px; font-size: 13px; }
+
+  input[type=text], input[type=password] {
+    font: inherit; color: var(--ink); background: var(--canvas);
+    border: 1px solid rgba(0, 0, 0, 0.08); border-radius: var(--r-pill);
+    height: 44px; padding: 0 20px; width: 100%;
+  }
+  input[type=text]:focus, input[type=password]:focus {
+    outline: 2px solid var(--primary-focus); outline-offset: 0; border-color: transparent;
+  }
+  input[type=checkbox] { accent-color: var(--primary); width: 16px; height: 16px; margin: 0; }
+
+  /* 頂端導覽：純黑細條 */
+  header {
+    display: flex; align-items: center; gap: 16px; height: 44px; flex-shrink: 0;
+    padding: 0 24px; background: var(--black); color: #fff;
+  }
+  header h1 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.374px; }
+  header h1 span { color: var(--muted-on-dark); font-weight: 400; }
+  header .spacer { flex: 1; }
+  #btnSettings {
+    background: var(--ink); border: none; color: #fff; border-radius: var(--r-sm);
+    padding: 6px 14px; font-size: 12px;
+  }
+
+  main {
+    flex: 1; display: flex; gap: 24px; padding: 24px; min-height: 0;
+    width: 100%; max-width: 1440px; margin: 0 auto;
+  }
+
+  /* 舞台：深色區塊，影片在上、資訊列在下 */
+  #stage {
+    flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0;
+    background: var(--tile); color: #fff; border-radius: var(--r-lg); overflow: hidden;
+    align-self: flex-start;
+  }
+  #playerWrap {
+    position: relative; width: 100%; aspect-ratio: 16 / 9; background: var(--black);
+    max-height: calc(100vh - 200px);
+  }
+  #playerWrap iframe, #player { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #idle {
+    position: absolute; inset: 0; z-index: 2;
+    display: flex; flex-direction: column; gap: 24px;
+    align-items: center; justify-content: center;
+    background: var(--black); color: var(--muted-on-dark);
+    font-size: 28px; line-height: 1.14; letter-spacing: 0.196px; text-align: center; padding: 24px;
+  }
+  #idle.hidden { display: none; }
+  #idle button { font-size: 18px; font-weight: 300; padding: 14px 28px; letter-spacing: 0; }
+  #idle .idleNote { max-width: 34em; font-size: 17px; line-height: 1.6; letter-spacing: -0.374px; }
+  #idle code { background: rgba(255, 255, 255, 0.14); color: #fff; font-size: 15px; }
+
+  /* 全螢幕：影片上方浮一排半透明圓角按鈕，滑到頂端才出現 */
+  #fsBar {
+    position: absolute; top: 0; left: 0; right: 0; height: 76px; z-index: 3;
+    display: none; align-items: center; gap: 8px; padding: 0 24px;
+    opacity: 0; transition: opacity .2s;
+  }
+  #fsBar:hover { opacity: 1; }
+  #fsBar button {
+    height: 44px; padding: 0 20px; border: none;
+    background: var(--chip); color: var(--ink);
+    -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);
+  }
+  #fsBar .grow { flex: 1; }
+  #fsNext {
+    position: absolute; left: 24px; bottom: 64px; z-index: 3; display: none;
+    background: rgba(0, 0, 0, 0.55); color: #fff;
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+    padding: 8px 18px; border-radius: var(--r-pill); font-size: 21px;
+    font-weight: 600; letter-spacing: 0.231px; pointer-events: none;
+  }
+  #playerWrap.fs { max-height: none; }
+  #playerWrap.fs #fsBar { display: flex; }
+  #playerWrap.fs #fsNext.has { display: block; }
+
+  #nowBar { display: flex; align-items: center; gap: 16px; padding: 20px 24px; }
+  #nowInfo { flex: 1; min-width: 0; }
+  #nowTitle {
+    font-size: 21px; font-weight: 600; line-height: 1.19; letter-spacing: 0.231px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #nextTitle {
+    font-size: 14px; letter-spacing: -0.224px; color: var(--muted-on-dark); margin-top: 4px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #nowBar .ctrls { display: flex; gap: 8px; flex-shrink: 0; }
+  #nowBar button:not(.primary) { color: var(--primary-on-dark); border-color: var(--primary-on-dark); }
+
+  /* 側欄：白色卡片 */
+  aside {
+    flex: 0 0 420px; display: flex; flex-direction: column; gap: 12px; min-height: 0;
+    background: var(--canvas); border: 1px solid var(--hairline);
+    border-radius: var(--r-lg); padding: 24px;
+  }
+  #searchForm { display: flex; gap: 8px; }
+  #searchForm input { flex: 1; }
+  #searchForm button { height: 44px; padding: 0 22px; font-size: 17px; letter-spacing: -0.374px; }
+  #hint {
+    padding: 0 8px; font-size: 13px; letter-spacing: -0.224px;
+    line-height: 1.5; color: var(--ink-48);
+  }
+  #searchForm button.ghost { font-size: 14px; padding: 0 16px; }
+
+  /* 分頁：一排小膠囊，選中的填墨色 */
+  .tabs { display: flex; gap: 4px; padding: 4px; background: var(--parchment); border-radius: var(--r-pill); }
+  .tabs button {
+    flex: 1; border: none; color: var(--ink-80); background: transparent; padding: 7px 10px;
+  }
+  .tabs button.on { background: var(--ink); color: #fff; }
+
+  .pane { flex: 1; overflow-y: auto; min-height: 0; display: none; margin: 0 -8px; padding: 0 8px; }
+  .pane.on { display: block; }
+  .msg { color: var(--ink-48); padding: 24px 4px; font-size: 14px; letter-spacing: -0.224px; line-height: 1.6; }
+  .msg + .msg { padding-top: 0; }
+
+  .row {
+    display: flex; gap: 12px; align-items: center; padding: 10px 8px;
+    border-bottom: 1px solid var(--divider);
+  }
+  .row:last-child { border-bottom: none; }
+  .row img {
+    width: 96px; height: 54px; object-fit: cover; border-radius: var(--r-sm);
+    flex-shrink: 0; background: var(--parchment);
+  }
+  .row .info { flex: 1; min-width: 0; }
+  .row .t {
+    font-size: 14px; font-weight: 600; line-height: 1.29; letter-spacing: -0.224px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .row .c { font-size: 12px; letter-spacing: -0.12px; color: var(--ink-48); margin-top: 3px; }
+  .row .acts { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+  .row .acts.h { flex-direction: row; gap: 4px; }
+  .row .acts.h button {
+    width: 30px; height: 30px; padding: 0; font-size: 14px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  #pane-queue .row img { width: 72px; height: 40px; }
+  .row.playing { background: var(--parchment); border-radius: var(--r-md); border-bottom: none; }
+  .row .num { width: 20px; text-align: center; color: var(--ink-48); font-size: 12px; flex-shrink: 0; }
+  .tag { font-size: 12px; color: var(--ink-48); }
+  .paneHead {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 8px 4px; color: var(--ink-48);
+    font-size: 12px; font-weight: 600; letter-spacing: -0.12px;
+  }
+
+  #toast {
+    position: fixed; left: 50%; bottom: 32px; z-index: 99;
+    transform: translateX(-50%) translateY(12px);
+    background: var(--ink); color: #fff; border-radius: var(--r-pill);
+    padding: 11px 22px; font-size: 14px; letter-spacing: -0.224px;
+    opacity: 0; transition: opacity .25s, transform .25s; pointer-events: none;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  dialog {
+    background: var(--canvas); color: var(--ink); border: none;
+    border-radius: var(--r-lg); width: min(560px, 92vw); padding: 32px;
+  }
+  dialog::backdrop {
+    background: rgba(0, 0, 0, 0.4);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  }
+  dialog h2 { margin: 0 0 12px; font-size: 28px; font-weight: 600; line-height: 1.14; }
+  dialog ol { padding-left: 20px; line-height: 1.8; color: var(--ink-80); font-size: 14px; letter-spacing: -0.224px; }
+  dialog .btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 24px; flex-wrap: wrap; }
+  kbd {
+    background: var(--parchment); border: 1px solid var(--hairline);
+    border-radius: 5px; padding: 0 6px; font-size: 12px; font-family: inherit;
+  }
+
+  @media (max-width: 1068px) {
+    aside { flex-basis: 360px; }
+  }
+  @media (max-width: 833px) {
+    main { flex-direction: column; overflow-y: auto; padding: 16px; gap: 16px; }
+    #stage { align-self: stretch; }
+    aside { flex: 0 0 auto; height: 70vh; padding: 16px; }
+    #nowBar { flex-wrap: wrap; }
+  }
+
+  /* ---- 新增：音訊、歌詞、歌曲設定 ---- */
+  header .btn-nav {
+    background: var(--ink); border: none; color: #fff; border-radius: var(--r-sm);
+    padding: 6px 14px; font-size: 12px;
+  }
+  #nowBar { flex-wrap: wrap; }
+  #nowInfo { min-width: 200px; }
+  #nowBar .ctrls { flex-wrap: wrap; }
+  #nowBar button.on { background: var(--primary-on-dark); border-color: var(--primary-on-dark); color: #fff; }
+
+  /* 歌詞條：影片正下方 */
+  #lyrics {
+    display: flex; align-items: center; gap: 16px; padding: 20px 24px 0;
+    min-height: 96px;
+  }
+  #lyrics.hidden { display: none; }
+  #lyLines { flex: 1; min-width: 0; text-align: center; }
+  #lyCur {
+    font-size: 28px; font-weight: 600; line-height: 1.25; letter-spacing: 0.196px;
+    color: #fff; min-height: 35px;
+  }
+  #lyCur.muted { font-size: 17px; font-weight: 400; color: var(--muted-on-dark); }
+  #lyNext { font-size: 17px; color: var(--muted-on-dark); margin-top: 6px; min-height: 25px; }
+  #lyCtrls { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+  #lyCtrls button { color: var(--primary-on-dark); border-color: var(--primary-on-dark); }
+  #lyOff {
+    min-width: 64px; text-align: center; font-size: 12px; color: var(--muted-on-dark);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 全螢幕歌詞 */
+  #fsLyrics {
+    position: absolute; left: 50%; bottom: 72px; transform: translateX(-50%); z-index: 3;
+    display: none; max-width: 86%; text-align: center; pointer-events: none;
+    background: rgba(0, 0, 0, 0.55); color: #fff; border-radius: var(--r-lg);
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+    padding: 14px 28px;
+  }
+  #fsLyCur { font-size: 40px; font-weight: 600; line-height: 1.2; }
+  #fsLyNext { font-size: 24px; color: var(--muted-on-dark); margin-top: 6px; }
+  #playerWrap.fs #fsLyrics.has { display: block; }
+  #fsNext { top: 88px; bottom: auto; left: auto; right: 24px; font-size: 17px; }
+
+  /* 表單元件 */
+  select, textarea {
+    font: inherit; font-size: 14px; color: var(--ink); background: var(--canvas);
+    border: 1px solid rgba(0, 0, 0, 0.12); border-radius: var(--r-sm); padding: 8px 10px;
+  }
+  select { width: 100%; height: 40px; }
+  textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+  select:focus, textarea:focus { outline: 2px solid var(--primary-focus); outline-offset: 0; }
+  input[type=range] { width: 100%; accent-color: var(--primary); }
+
+  dialog h3 { margin: 24px 0 8px; font-size: 17px; font-weight: 600; }
+  dialog .note { font-size: 13px; line-height: 1.6; color: var(--ink-48); margin: 6px 0; letter-spacing: -0.224px; }
+  dialog .inline { display: flex; gap: 8px; align-items: center; }
+  dialog .inline input { flex: 1; height: 40px; }
+  dialog .inline button { flex-shrink: 0; }
+  dialog details { margin-top: 12px; }
+  dialog summary { cursor: pointer; font-size: 14px; color: var(--primary); }
+  dialog details textarea { margin: 8px 0; }
+  #songDlg, #audioDlg { width: min(640px, 94vw); max-height: 90vh; }
+  #sdLrcList { max-height: 260px; overflow-y: auto; margin-top: 8px; }
+
+  .field {
+    display: grid; grid-template-columns: 96px 1fr 56px; gap: 12px;
+    align-items: center; margin: 12px 0; font-size: 14px;
+  }
+  .field > label { color: var(--ink-80); }
+  .field .val { text-align: right; color: var(--ink-48); font-variant-numeric: tabular-nums; font-size: 13px; }
+  .field.wide { grid-template-columns: 96px 1fr; }
+  .meterRow { display: flex; gap: 12px; align-items: center; }
+  .meter { flex: 1; height: 8px; border-radius: var(--r-pill); background: var(--parchment); overflow: hidden; }
+  #micMeter { height: 100%; width: 0; background: var(--primary); transition: width .05s linear; }
+  #micMeter.hot { background: #d70015; }
+
+  .row .info.click { cursor: pointer; }
+  .row .info.click:hover .t { color: var(--primary); }
+  .badge {
+    display: inline-block; font-size: 11px; line-height: 1; padding: 3px 6px; margin-left: 4px;
+    border-radius: var(--r-pill); background: var(--parchment); color: var(--ink-80);
+    vertical-align: 1px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1><span>♪</span> KTV</h1>
+  <div class="spacer"></div>
+  <button id="btnAudio" class="btn-nav">音訊</button>
+  <button id="btnSettings" class="btn-nav">設定</button>
+</header>
+
+<main>
+  <section id="stage">
+    <div id="playerWrap">
+      <div id="player"></div>
+      <div id="idle"></div>
+      <div id="fsBar">
+        <button id="fsRestart">重唱</button>
+        <button id="fsSkip">切歌</button>
+        <button id="fsVocal">原唱</button>
+        <div class="grow"></div>
+        <button id="fsExit">離開全螢幕</button>
+      </div>
+      <div id="fsNext"></div>
+      <div id="fsLyrics"><div id="fsLyCur"></div><div id="fsLyNext"></div></div>
+    </div>
+    <div id="lyrics" class="hidden">
+      <div id="lyLines">
+        <div id="lyCur"></div>
+        <div id="lyNext"></div>
+      </div>
+      <div id="lyCtrls">
+        <button id="lyLater" class="small" title="歌詞跑太快：延後 0.5 秒（快捷鍵 [）">延後</button>
+        <div id="lyOff"></div>
+        <button id="lyEarlier" class="small" title="歌詞跑太慢：提前 0.5 秒（快捷鍵 ]）">提前</button>
+        <button id="lyMore" class="small" title="這首歌的歌詞和伴唱版設定">⋯</button>
+      </div>
+    </div>
+    <div id="nowBar">
+      <div id="nowInfo">
+        <div id="nowTitle">尚未播放</div>
+        <div id="nextTitle"></div>
+      </div>
+      <div class="ctrls">
+        <button id="btnRestart" title="快捷鍵 R">重唱</button>
+        <button id="btnPause">暫停</button>
+        <button id="btnVocal" title="切換原唱／伴唱（快捷鍵 V）">原唱</button>
+        <button id="btnMic" title="開關麥克風（快捷鍵 M）">麥克風</button>
+        <button id="btnSkip" class="primary" title="快捷鍵 N">切歌</button>
+        <button id="btnFs">全螢幕</button>
+      </div>
+    </div>
+  </section>
+
+  <aside>
+    <form id="searchForm" autocomplete="off">
+      <input id="q" type="text" placeholder="貼上 YouTube 影片連結">
+      <button type="submit" class="primary">點歌</button>
+      <button type="button" id="btnInsert" class="ghost" title="排到下一首">插播</button>
+    </form>
+    <div id="hint">
+      在 YouTube 找到歌、複製網址貼上來。
+      打歌名按 Enter，會在新分頁幫你開 YouTube 搜尋。
+      點清單裡的歌名可以設定伴唱版和歌詞。
+    </div>
+    <div class="tabs">
+      <button data-tab="queue" class="on">待唱 <span id="qCount"></span></button>
+      <button data-tab="history">唱過</button>
+    </div>
+    <div id="pane-queue" class="pane on"></div>
+    <div id="pane-history" class="pane"></div>
+  </aside>
+</main>
+
+<!-- 音訊 -->
+<dialog id="audioDlg">
+  <h2>音訊</h2>
+
+  <h3>麥克風</h3>
+  <div class="field wide">
+    <label for="micSel">輸入裝置</label>
+    <select id="micSel"></select>
+  </div>
+  <div class="field wide">
+    <label>音量表</label>
+    <div class="meterRow">
+      <div class="meter"><div id="micMeter"></div></div>
+      <button id="micToggle" class="primary small">開啟麥克風</button>
+    </div>
+  </div>
+  <div class="field wide">
+    <label for="outSel">監聽輸出</label>
+    <select id="outSel"></select>
+  </div>
+  <p id="outNote" class="note"></p>
+
+  <div class="field">
+    <label for="rMic">麥克風音量</label>
+    <input id="rMic" type="range" min="0" max="200" step="5">
+    <span class="val" id="vMic"></span>
+  </div>
+  <div class="field">
+    <label for="rEcho">回音</label>
+    <input id="rEcho" type="range" min="0" max="100" step="5">
+    <span class="val" id="vEcho"></span>
+  </div>
+  <div class="field">
+    <label for="rRev">殘響</label>
+    <input id="rRev" type="range" min="0" max="100" step="5">
+    <span class="val" id="vRev"></span>
+  </div>
+
+  <h3>音樂</h3>
+  <div class="field">
+    <label for="rMusic">音樂音量</label>
+    <input id="rMusic" type="range" min="0" max="100" step="1">
+    <span class="val" id="vMusic"></span>
+  </div>
+  <p class="note">
+    音樂是 YouTube 播放器的聲音，只能調大小，一定從系統預設的輸出裝置播放。
+    要讓音樂也進監聽耳機，請把系統的預設輸出設成那副耳機。
+  </p>
+
+  <p id="latency" class="note"></p>
+  <p class="note">
+    建議用有線耳機。藍牙耳機延遲通常明顯比有線大，聽自己的聲音會慢半拍。
+  </p>
+  <div class="btns">
+    <button id="audioClose" class="primary">完成</button>
+  </div>
+</dialog>
+
+<!-- 這首歌的設定 -->
+<dialog id="songDlg">
+  <h2 id="sdTitle"></h2>
+
+  <h3>伴唱版</h3>
+  <p class="note">貼上同一首歌的 KTV／伴奏版 YouTube 連結，就能用「原唱／伴唱」鍵切換。</p>
+  <div class="inline">
+    <input id="sdKaraoke" type="text" placeholder="伴唱版 YouTube 連結">
+    <button id="sdKaraokeSave" class="primary">儲存</button>
+    <button id="sdKaraokeDel">移除</button>
+  </div>
+
+  <h3>歌詞</h3>
+  <p id="sdLrcStatus" class="note"></p>
+  <form id="sdLrcForm" class="inline" autocomplete="off">
+    <input id="sdLrcQ" type="text" placeholder="歌名 歌手（只打歌名通常比較準）">
+    <button type="submit" class="primary">搜尋歌詞</button>
+  </form>
+  <div id="sdLrcList"></div>
+  <details>
+    <summary>手動貼上 LRC 歌詞</summary>
+    <textarea id="sdLrcText" rows="6" placeholder="[00:12.30]第一句歌詞&#10;[00:16.80]第二句歌詞"></textarea>
+    <button id="sdLrcApply" class="small primary">套用</button>
+  </details>
+
+  <div class="btns">
+    <button id="sdLrcClear">不顯示這首的歌詞</button>
+    <button id="sdClose" class="primary">關閉</button>
+  </div>
+</dialog>
+
+<dialog id="settings">
+  <h2>設定</h2>
+  <p style="font-size:14px;line-height:1.9">
+    快捷鍵：<kbd>N</kbd> 切歌、<kbd>R</kbd> 重唱、<kbd>V</kbd> 原唱／伴唱、
+    <kbd>M</kbd> 麥克風、<kbd>[</kbd> 歌詞延後、<kbd>]</kbd> 歌詞提前。
+    游標點在影片上時快捷鍵無效，點一下影片以外的地方就好。
+  </p>
+  <p style="font-size:14px;line-height:1.7;color:var(--muted)">
+    請雙擊資料夾裡的 <code>start.cmd</code> 開啟（網址是 http://localhost:8766）。
+    直接雙擊 index.html 開的話，YouTube 會拒絕播放每一首歌（錯誤 153）。
+  </p>
+  <p style="font-size:14px;line-height:1.7;color:var(--muted)">
+    不能嵌入播放的影片會被記下來，下次貼同一支會直接擋掉。
+    如果那支影片後來開放了，可以清除這份名單。
+  </p>
+  <div class="btns">
+    <button id="btnClearBlocked">清除「無法播放」名單</button>
+    <button id="btnCloseSettings" class="primary">關閉</button>
+  </div>
+</dialog>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+
+// =====================================================================
+// 儲存
+// =====================================================================
+const LS = {
+  get(k, d) {
+    try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); }
+    catch { return d; }
+  },
+  set(k, v) {
+    try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* 額度滿或被禁用 */ }
+  },
+};
+const K = {
+  queue: 'ktv.queue', current: 'ktv.current',
+  history: 'ktv.history', blocked: 'ktv.blocked',
+  meta: 'ktv.meta',        // 每首歌（以原唱影片 ID 為 key）：伴唱版、歌詞
+  offsets: 'ktv.offsets',  // 每支影片的歌詞時間微調（秒）
+  mode: 'ktv.vocalMode',   // 'original' | 'karaoke'
+  audio: 'ktv.audio',      // 麥克風與音量設定
+};
+// 舊版搜尋功能留下的資料（含 API 金鑰），一併清掉
+for (const k of ['ktv.apiKey', 'ktv.searchCache', 'ktv.quota', 'ktv.addKtv']) {
+  try { localStorage.removeItem(k); } catch { /* 忽略 */ }
+}
+const HISTORY_MAX = 100;
+const META_MAX = 300;
+// 直接雙擊 index.html（file://）開的網頁不會送 Referer，YouTube 會拒絕播放每一支影片（錯誤 153）。
+// 要用 start.cmd 開，網址固定是這個（埠號和 start.ps1 一致）。
+const FILE_MODE = location.protocol === 'file:';
+const LOCAL_URL = 'http://localhost:8766/';
+
+const state = {
+  queue: LS.get(K.queue, []),
+  current: null,
+  history: LS.get(K.history, []),
+  blocked: new Set(LS.get(K.blocked, [])),
+  meta: LS.get(K.meta, {}),
+  offsets: LS.get(K.offsets, {}),
+  mode: LS.get(K.mode, 'original'),
+};
+// 重新整理前正在唱的歌，放回待唱第一首（瀏覽器不允許沒點擊就自動播放有聲影片）
+const restored = LS.get(K.current, null);
+if (restored) state.queue.unshift(restored);
+
+function save() {
+  LS.set(K.queue, state.queue);
+  LS.set(K.current, state.current);
+  LS.set(K.history, state.history);
+  LS.set(K.blocked, [...state.blocked]);
+}
+function saveMeta() {
+  const keys = Object.keys(state.meta);
+  if (keys.length > META_MAX) {
+    keys.sort((a, b) => (state.meta[b].used || 0) - (state.meta[a].used || 0));
+    for (const k of keys.slice(META_MAX)) delete state.meta[k];
+  }
+  LS.set(K.meta, state.meta);
+  LS.set(K.offsets, state.offsets);
+}
+function metaOf(vid) { return state.meta[vid] || (state.meta[vid] = {}); }
+function karaokeOf(item) { const m = state.meta[item.videoId]; return (m && m.karaoke) || null; }
+function offsetOf(vid) { return state.offsets[vid] || 0; }
+function isCurrent(item) { return !!(item && state.current && state.current.uid === item.uid); }
+
+// =====================================================================
+// 小工具
+// =====================================================================
+const $ = (s) => document.querySelector(s);
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+function el(tag, props = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') e.className = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else if (k === 'text') e.textContent = v;
+    else e[k] = v;
+  }
+  for (const c of kids) if (c != null) e.append(c);
+  return e;
+}
+let toastTimer;
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+}
+function thumbOf(id) { return `https://i.ytimg.com/vi/${id}/mqdefault.jpg`; }
+function fmtDur(s) {
+  s = Math.round(s || 0);
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+
+function parseVideoId(s) {
+  let u;
+  try { u = new URL(String(s).trim()); } catch { return null; }
+  const host = u.hostname.replace(/^www\.|^m\.|^music\./, '');
+  let id = null;
+  if (host === 'youtu.be') id = u.pathname.slice(1).split('/')[0];
+  else if (host === 'youtube.com' || host === 'youtube-nocookie.com') {
+    id = u.searchParams.get('v');
+    const m = u.pathname.match(/^\/(?:shorts|embed|live|v)\/([\w-]{11})/);
+    if (!id && m) id = m[1];
+  }
+  return id && /^[\w-]{11}$/.test(id) ? id : null;
+}
+
+// =====================================================================
+// 從 YouTube 標題猜歌名和歌手（給歌詞搜尋用）
+// =====================================================================
+const CJK = /[㐀-鿿豈-﫿]/;
+const NOISE = new RegExp([
+  'official\\s*(music\\s*)?(video|mv|audio|lyric\\s*video)?', 'music\\s*video', 'lyrics?\\s*video',
+  'lyrics?', 'm\\/?v', 'audio', 'visualizer', 'hd', '4k', 'hq', 'karaoke', 'ktv',
+  '官方(完整版|高畫質|頻道)?', '高畫質', '完整版', '動態歌詞', '歌詞版?', '中字', '字幕', '伴奏', '伴唱',
+].map((s) => '(?:^|\\s|[|/｜])' + s + '(?=$|\\s|[|/｜])').join('|'), 'gi');
+const CJK_NOISE = /官方(完整版|高畫質|頻道|版)?|高畫質|完整版|動態歌詞|歌詞版?|中字|字幕|伴奏版?|伴唱版?|卡拉OK/gi;
+const BRACKETS = /[【「『《\[〔]([^】」』》\]〕]*)[】」』》\]〕]/g;
+
+function tidy(s) {
+  let t = String(s || '');
+  t = t.replace(/[(（][^)）]*[)）]/g, ' ');   // 括號裡多半是英文名、電影名、feat.
+  t = t.replace(NOISE, ' ');
+  if (CJK.test(t)) t = t.replace(/[A-Za-z][A-Za-z0-9.'’&!?,:\-\s]*/g, ' '); // 有中文就丟掉英文譯名
+  t = t.replace(/\s*(feat|ft)\.?\s.*$/i, ' ');
+  t = t.replace(CJK_NOISE, ' ');
+  t = t.replace(/[|｜/_~～\-–—:：]+/g, ' ');
+  return t.replace(/\s+/g, ' ').trim();
+}
+
+function cleanTitle(title, channel) {
+  const raw = String(title || '').replace(/[(（][^)）]*[)）]/g, ' ');
+  let track = '', artist = '';
+  // 1) 括號標題：周杰倫 Jay Chou【晴天 Sunny Day】Official MV
+  const groups = [...raw.matchAll(BRACKETS)];
+  for (const g of groups) {
+    const inner = tidy(g[1]);
+    if (inner) { track = inner; break; }
+  }
+  if (track) {
+    artist = tidy(raw.replace(BRACKETS, ' '));
+  } else {
+    // 2) 歌手 - 歌名
+    const parts = raw.replace(BRACKETS, ' ').split(/\s+[-–—|｜]\s+|\s*[-–—]\s*(?=\S)/).map(tidy).filter(Boolean);
+    if (parts.length >= 2) { artist = parts[0]; track = parts[1]; }
+    else track = tidy(raw);
+  }
+  if (!artist && channel) {
+    const ch = tidy(channel);
+    if (ch && CJK.test(ch)) artist = ch;
+  }
+  if (artist === track) artist = '';
+  return { track, artist };
+}
+
+// =====================================================================
+// 歌詞（LRCLIB）
+// =====================================================================
+const LRCLIB = 'https://lrclib.net/api';
+async function lrcSearch(params) {
+  const r = await fetch(LRCLIB + '/search?' + new URLSearchParams(params));
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const j = await r.json();
+  return Array.isArray(j) ? j : [];
+}
+
+function parseLRC(text) {
+  const out = [];
+  if (!text) return out;
+  const tagRe = /\[(\d{1,3}):(\d{1,2}(?:[.:]\d{1,3})?)\]/g;
+  for (const rawLine of String(text).split(/\r?\n/)) {
+    const tags = [...rawLine.matchAll(tagRe)];
+    if (!tags.length) continue;
+    const txt = rawLine.replace(tagRe, '').replace(/<\d+:\d+(?:[.:]\d+)?>/g, '').trim();
+    for (const m of tags) {
+      out.push({ t: parseInt(m[1], 10) * 60 + parseFloat(m[2].replace(':', '.')), text: txt });
+    }
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
+
+function pickByDuration(list, dur) {
+  if (!dur) return list;
+  return [...list].sort((a, b) => Math.abs(a.duration - dur) - Math.abs(b.duration - dur));
+}
+
+function lrcFromResult(r) {
+  return { id: r.id, track: r.trackName, artist: r.artistName, duration: r.duration, synced: r.syncedLyrics };
+}
+
+// 播放時自動找：先用「歌名＋歌手」精準找，找不到再用關鍵字找
+async function autoLyrics(item, dur) {
+  const m = metaOf(item.videoId);
+  m.lrcTried = true;
+  saveMeta();
+  const { track, artist } = cleanTitle(item.title, item.channel);
+  if (!track) { if (isCurrent(item)) setLyricsStatus('猜不出歌名，按「⋯」手動搜尋歌詞'); return; }
+  if (isCurrent(item)) setLyricsStatus('找歌詞中…');
+  m.query = [track, artist].filter(Boolean).join(' ');
+  let res = [];
+  try {
+    if (artist) res = (await lrcSearch({ track_name: track, artist_name: artist })).filter((r) => r.syncedLyrics);
+    if (!res.length) res = (await lrcSearch({ q: m.query })).filter((r) => r.syncedLyrics);
+    if (!res.length && artist) res = (await lrcSearch({ track_name: track })).filter((r) => r.syncedLyrics);
+  } catch {
+    if (isCurrent(item)) setLyricsStatus('歌詞服務連不上，可按「⋯」手動貼歌詞');
+    return;
+  }
+  if (!res.length) {
+    saveMeta();
+    if (isCurrent(item)) setLyricsStatus('找不到同步歌詞，按「⋯」可以換關鍵字搜尋');
+    return;
+  }
+  m.lrc = lrcFromResult(pickByDuration(res, dur)[0]);
+  m.lrc.auto = true;
+  saveMeta();
+  if (isCurrent(item)) applyLyrics(item);
+  renderQueue();
+}
+
+// ---- 歌詞顯示 ----
+const lyr = { uid: null, lines: [], idx: -2, status: '', autoPending: false };
+
+function applyLyrics(item) {
+  const m = state.meta[item.videoId];
+  lyr.uid = item.uid;
+  lyr.lines = m && m.lrc ? parseLRC(m.lrc.synced) : [];
+  lyr.idx = -2;
+  lyr.autoPending = !(m && (m.lrc || m.lrcTried));
+  lyr.status = lyr.lines.length ? '' :
+    (lyr.autoPending ? '' : '這首沒有歌詞。按「⋯」可以搜尋或手動貼上');
+  drawLyrics();
+}
+function setLyricsStatus(s) {
+  lyr.status = s; lyr.lines = []; lyr.idx = -2;
+  drawLyrics();
+}
+function clearLyrics() {
+  lyr.uid = null; lyr.lines = []; lyr.idx = -2; lyr.status = ''; lyr.autoPending = false;
+  drawLyrics();
+}
+
+function tickLyrics() {
+  if (!state.current || !playerReady || !lyr.lines.length) return;
+  let t;
+  try { t = player.getCurrentTime(); } catch { return; }
+  if (typeof t !== 'number') return;
+  t += offsetOf(state.current.playing);
+  let lo = 0, hi = lyr.lines.length - 1, i = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (lyr.lines[mid].t <= t) { i = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  if (i !== lyr.idx) { lyr.idx = i; drawLyrics(); }
+}
+
+function drawLyrics() {
+  const box = $('#lyrics');
+  const has = !!state.current;
+  box.classList.toggle('hidden', !has);
+  let cur = '', next = '', muted = false;
+  if (has) {
+    if (!lyr.lines.length) { cur = lyr.status; muted = true; }
+    else if (lyr.idx < 0) { cur = '♪'; next = lyr.lines[0].text; }
+    else {
+      cur = lyr.lines[lyr.idx].text || '♪';
+      const n = lyr.lines[lyr.idx + 1];
+      next = n ? (n.text || '♪') : '';
+    }
+  }
+  $('#lyCur').textContent = cur;
+  $('#lyCur').classList.toggle('muted', muted);
+  $('#lyNext').textContent = next;
+  const fsHas = has && lyr.lines.length > 0;
+  $('#fsLyrics').classList.toggle('has', fsHas);
+  $('#fsLyCur').textContent = fsHas ? cur : '';
+  $('#fsLyNext').textContent = fsHas ? next : '';
+  const off = state.current ? offsetOf(state.current.playing) : 0;
+  $('#lyOff').textContent = (off > 0 ? '+' : off < 0 ? '−' : '±') + Math.abs(off).toFixed(1) + ' 秒';
+  const noLines = !lyr.lines.length;
+  $('#lyLater').disabled = $('#lyEarlier').disabled = noLines;
+}
+
+function nudgeLyrics(d) {
+  if (!state.current || !lyr.lines.length) return;
+  const vid = state.current.playing;
+  const v = Math.round((offsetOf(vid) + d) * 10) / 10;
+  if (v) state.offsets[vid] = v; else delete state.offsets[vid];
+  saveMeta();
+  lyr.idx = -2; tickLyrics(); drawLyrics();
+}
+
+setInterval(tickLyrics, 100);
+
+// =====================================================================
+// 點歌與播放
+// =====================================================================
+function makeItem(info) {
+  return {
+    uid: uid(), videoId: info.videoId, title: info.title || '（讀取標題中…）',
+    channel: info.channel || '', thumb: info.thumb || thumbOf(info.videoId),
+    untitled: !info.title,
+  };
+}
+
+function addSong(info, front = false) {
+  if (state.blocked.has(info.videoId)) { toast('這支影片不能嵌入播放，換一個版本吧'); return null; }
+  const item = makeItem(info);
+  if (front) state.queue.unshift(item); else state.queue.push(item);
+  save();
+  if (!state.current && playerReady && !FILE_MODE) playNext();
+  else toast(front ? `插播：${item.title}` : `已點：${item.title}`);
+  render();
+  return item;
+}
+
+async function fetchTitle(id) {
+  try {
+    const u = 'https://www.youtube.com/oembed?format=json&url=' +
+      encodeURIComponent('https://www.youtube.com/watch?v=' + id);
+    const r = await fetch(u);
+    if (r.ok) return await r.json();
+  } catch { /* 忽略 */ }
+  return null;
+}
+
+async function addFromId(id, front = false) {
+  const item = addSong({ videoId: id }, front);
+  if (!item) return;
+  const j = await fetchTitle(id);
+  if (j) updateTitle(item.uid, j.title, j.author_name);
+}
+
+function updateTitle(itemUid, title, channel) {
+  if (!title) return;
+  const all = [...state.queue, state.current, ...state.history].filter(Boolean);
+  for (const x of all) {
+    if (x.uid === itemUid && x.untitled) {
+      x.title = title; x.untitled = false;
+      if (channel) x.channel = channel;
+    }
+  }
+  save(); render();
+}
+
+function pushHistory(item) {
+  state.history = state.history.filter((h) => h.videoId !== item.videoId);
+  const { playing, ...rest } = item;
+  state.history.unshift({ ...rest, at: Date.now() });
+  state.history.length = Math.min(state.history.length, HISTORY_MAX);
+}
+
+function playNext() {
+  if (!playerReady) return;
+  const next = state.queue.shift() || null;
+  state.current = next;
+  if (next) {
+    const k = karaokeOf(next);
+    next.playing = state.mode === 'karaoke' && k && !state.blocked.has(k) ? k : next.videoId;
+    pushHistory(next);
+    metaOf(next.videoId).used = Date.now();
+    saveMeta();
+    player.loadVideoById(next.playing);
+    applyLyrics(next);
+  } else {
+    try { player.stopVideo(); } catch { /* 忽略 */ }
+    clearLyrics();
+  }
+  save(); render();
+}
+
+// 換到同一首歌的另一個版本；用兩支影片各自的歌詞微調值對齊時間
+function loadVersion(item, vid) {
+  let start = 0;
+  try {
+    const t = player.getCurrentTime() || 0;
+    start = Math.max(0, t + offsetOf(item.playing) - offsetOf(vid));
+  } catch { /* 忽略 */ }
+  item.playing = vid;
+  player.loadVideoById({ videoId: vid, startSeconds: start });
+  lyr.idx = -2;
+  save(); render();
+}
+
+function toggleVocal() {
+  state.mode = state.mode === 'karaoke' ? 'original' : 'karaoke';
+  LS.set(K.mode, state.mode);
+  const cur = state.current;
+  const label = state.mode === 'karaoke' ? '伴唱' : '原唱';
+  if (cur && playerReady) {
+    const k = karaokeOf(cur);
+    if (k) {
+      loadVersion(cur, state.mode === 'karaoke' ? k : cur.videoId);
+      toast(label);
+    } else if (state.mode === 'karaoke') {
+      toast('這首還沒設定伴唱版，按歌詞旁的「⋯」可以加');
+    } else toast(label);
+  } else {
+    toast(`之後的歌會播${label}${state.mode === 'karaoke' ? '（有設定伴唱版的話）' : ''}`);
+  }
+  render();
+}
+
+function restart() {
+  if (state.current && playerReady) { player.seekTo(0, true); player.playVideo(); }
+}
+function togglePause() {
+  if (!state.current || !playerReady) return;
+  if (player.getPlayerState() === YT.PlayerState.PLAYING) player.pauseVideo();
+  else player.playVideo();
+}
+
+function moveQueue(i, to) {
+  if (to < 0 || to >= state.queue.length) return;
+  const [x] = state.queue.splice(i, 1);
+  state.queue.splice(to, 0, x);
+  save(); render();
+}
+function removeQueue(i) { state.queue.splice(i, 1); save(); render(); }
+
+// ---------- 貼連結 ----------
+function submitLink(front) {
+  const raw = $('#q').value;
+  const id = parseVideoId(raw);
+  if (id) {
+    addFromId(id, front);
+    $('#q').value = '';
+    showTab('queue');
+    return;
+  }
+  const q = raw.trim();
+  if (!q) { $('#q').focus(); return; }
+  const url = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q);
+  window.open(url, '_blank', 'noopener');
+  $('#q').select();
+  toast('這不是 YouTube 連結，已在新分頁幫你搜尋');
+}
+
+// =====================================================================
+// 這首歌的設定（伴唱版、歌詞）
+// =====================================================================
+let sdItem = null;
+let sdResults = [];
+
+function openSongDlg(item) {
+  sdItem = item;
+  const m = state.meta[item.videoId] || {};
+  $('#sdTitle').textContent = item.title;
+  $('#sdKaraoke').value = m.karaoke ? 'https://youtu.be/' + m.karaoke : '';
+  const { track, artist } = cleanTitle(item.title, item.channel);
+  $('#sdLrcQ').value = m.query || [track, artist].filter(Boolean).join(' ');
+  $('#sdLrcText').value = '';
+  sdResults = [];
+  $('#sdLrcList').replaceChildren();
+  renderSdStatus();
+  $('#songDlg').showModal();
+}
+
+function renderSdStatus() {
+  const m = state.meta[sdItem.videoId] || {};
+  let s;
+  if (m.lrc) {
+    s = '目前使用：' + m.lrc.track + (m.lrc.artist ? ' — ' + m.lrc.artist : '') +
+      (m.lrc.duration ? `（${fmtDur(m.lrc.duration)}）` : '') + (m.lrc.auto ? '，自動找到的' : '');
+  } else if (m.lrcTried) s = '目前沒有歌詞。';
+  else s = '還沒找過歌詞，播放時會自動找。';
+  $('#sdLrcStatus').textContent = s;
+}
+
+function sdDuration() {
+  if (!isCurrent(sdItem) || !playerReady) return 0;
+  try { return player.getDuration() || 0; } catch { return 0; }
+}
+
+async function sdSearch(q) {
+  const list = $('#sdLrcList');
+  if (!q.trim()) return;
+  list.replaceChildren(el('div', { class: 'msg', text: '搜尋中…' }));
+  let res;
+  try { res = await lrcSearch({ q }); }
+  catch {
+    list.replaceChildren(el('div', { class: 'msg', text: '歌詞服務連不上，可以改用下面的「手動貼上 LRC 歌詞」。' }));
+    return;
+  }
+  metaOf(sdItem.videoId).query = q.trim();
+  saveMeta();
+  const synced = res.filter((r) => r.syncedLyrics);
+  if (!synced.length) {
+    list.replaceChildren(el('div', {
+      class: 'msg',
+      text: res.length ? '有找到歌詞，但都沒有時間軸，沒辦法跟著歌走。' : '找不到。換個關鍵字試試，只打歌名通常比較準。',
+    }));
+    return;
+  }
+  sdResults = pickByDuration(synced, sdDuration()).slice(0, 15);
+  renderSdList();
+}
+
+function renderSdList() {
+  const list = $('#sdLrcList');
+  const m = state.meta[sdItem.videoId] || {};
+  const dur = sdDuration();
+  list.replaceChildren(...sdResults.map((r) => {
+    const using = !!(m.lrc && m.lrc.id === r.id);
+    const diff = dur ? `，差 ${Math.round(Math.abs(r.duration - dur))} 秒` : '';
+    return el('div', { class: 'row' },
+      el('div', { class: 'info' },
+        el('div', { class: 't', text: r.trackName }),
+        el('div', { class: 'c', text: `${r.artistName} · ${fmtDur(r.duration)}${diff}` }),
+      ),
+      el('button', {
+        class: 'small' + (using ? '' : ' primary'), text: using ? '使用中' : '使用', disabled: using,
+        onclick: () => useLrc(sdItem, lrcFromResult(r)),
+      }),
+    );
+  }));
+}
+
+function useLrc(item, lrc) {
+  const m = metaOf(item.videoId);
+  m.lrc = lrc; m.lrcTried = true;
+  saveMeta();
+  if (isCurrent(item)) applyLyrics(item);
+  renderSdStatus();
+  if (sdResults.length) renderSdList();
+  renderQueue();
+  toast('已套用歌詞');
+}
+
+function saveKaraoke() {
+  const raw = $('#sdKaraoke').value.trim();
+  const m = metaOf(sdItem.videoId);
+  if (!raw) { removeKaraoke(); return; }
+  const id = parseVideoId(raw);
+  if (!id) { toast('看不懂這個連結，請貼 YouTube 影片網址'); return; }
+  if (id === sdItem.videoId) { toast('這是同一支影片，請貼伴唱版的連結'); return; }
+  m.karaoke = id;
+  saveMeta();
+  if (isCurrent(sdItem) && state.mode === 'karaoke' && playerReady) loadVersion(sdItem, id);
+  render();
+  toast(state.mode === 'karaoke' ? '已儲存伴唱版' : '已儲存，按「原唱」鍵可以切到伴唱');
+}
+
+function removeKaraoke() {
+  const m = metaOf(sdItem.videoId);
+  const had = m.karaoke;
+  m.karaoke = null;
+  saveMeta();
+  $('#sdKaraoke').value = '';
+  if (had && isCurrent(sdItem) && sdItem.playing === had && playerReady) loadVersion(sdItem, sdItem.videoId);
+  render();
+  if (had) toast('已移除伴唱版');
+}
+
+// =====================================================================
+// 麥克風（Web Audio）
+// =====================================================================
+const audio = {
+  ctx: null, nodes: null, stream: null, src: null, on: false, meterRaf: 0,
+  s: Object.assign({ micId: '', outId: '', micVol: 100, echo: 15, reverb: 25, music: 100 },
+    LS.get(K.audio, {})),
+};
+const canPickOutput = typeof AudioContext !== 'undefined' && 'setSinkId' in AudioContext.prototype;
+
+function saveAudio() { LS.set(K.audio, audio.s); }
+
+function makeImpulse(c, sec, decay) {
+  const len = Math.floor(c.sampleRate * sec);
+  const buf = c.createBuffer(2, len, c.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay);
+  }
+  return buf;
+}
+
+async function ensureCtx() {
+  if (!audio.ctx) {
+    const C = window.AudioContext || window.webkitAudioContext;
+    const c = new C({ latencyHint: 'interactive' });
+    // 麥克風 → 音量 → 乾聲 / 回音 / 殘響 → 總輸出
+    const n = {
+      input: c.createGain(), analyser: c.createAnalyser(), dry: c.createGain(),
+      delay: c.createDelay(1), fb: c.createGain(), echoWet: c.createGain(),
+      conv: c.createConvolver(), revWet: c.createGain(), master: c.createGain(),
+    };
+    n.analyser.fftSize = 1024;
+    n.delay.delayTime.value = 0.16;
+    n.conv.buffer = makeImpulse(c, 2.2, 3);
+    n.input.connect(n.analyser);
+    n.input.connect(n.dry).connect(n.master);
+    n.input.connect(n.delay);
+    n.delay.connect(n.fb).connect(n.delay);
+    n.delay.connect(n.echoWet).connect(n.master);
+    n.input.connect(n.conv).connect(n.revWet).connect(n.master);
+    n.master.connect(c.destination);
+    audio.ctx = c; audio.nodes = n;
+    applyLevels();
+    if (audio.s.outId) await applyOutput(audio.s.outId, true);
+  }
+  if (audio.ctx.state === 'suspended') await audio.ctx.resume();
+  return audio.ctx;
+}
+
+function applyLevels() {
+  const n = audio.nodes, s = audio.s;
+  if (n) {
+    const now = audio.ctx.currentTime;
+    n.input.gain.setTargetAtTime(s.micVol / 100, now, 0.02);
+    n.fb.gain.setTargetAtTime((s.echo / 100) * 0.55, now, 0.02);
+    n.echoWet.gain.setTargetAtTime((s.echo / 100) * 0.5, now, 0.02);
+    n.revWet.gain.setTargetAtTime((s.reverb / 100) * 0.7, now, 0.02);
+  }
+  if (playerReady) { try { player.unMute(); player.setVolume(s.music); } catch { /* 忽略 */ } }
+}
+
+async function applyOutput(id, quiet) {
+  if (!canPickOutput || !audio.ctx) return;
+  try { await audio.ctx.setSinkId(id || ''); }
+  catch (e) {
+    if (!quiet) toast('切換監聽輸出失敗：' + e.message);
+    audio.s.outId = ''; saveAudio();
+  }
+}
+
+async function micOn() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    toast('這個瀏覽器不能使用麥克風（網頁要用 https 開啟）'); return;
+  }
+  const base = {
+    echoCancellation: false, noiseSuppression: false, autoGainControl: false,
+    channelCount: 1, latency: 0,
+  };
+  try {
+    await ensureCtx();
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: audio.s.micId ? { ...base, deviceId: { exact: audio.s.micId } } : base,
+      });
+    } catch (e) {
+      if (e.name !== 'OverconstrainedError' && e.name !== 'NotFoundError') throw e;
+      audio.s.micId = ''; saveAudio();               // 之前選的麥克風拔掉了，改用預設
+      stream = await navigator.mediaDevices.getUserMedia({ audio: base });
+    }
+    audio.stream = stream;
+    audio.src = audio.ctx.createMediaStreamSource(stream);
+    audio.src.connect(audio.nodes.input);
+    audio.on = true;
+    startMeter();
+    await refreshDevices();
+  } catch (e) {
+    audio.on = false;
+    toast(e.name === 'NotAllowedError'
+      ? '麥克風權限被拒絕，請點網址列左邊的圖示允許麥克風'
+      : '麥克風開啟失敗：' + e.message);
+  }
+  renderAudio(); render();
+}
+
+function micOff() {
+  if (audio.src) audio.src.disconnect();
+  if (audio.stream) audio.stream.getTracks().forEach((t) => t.stop());
+  audio.src = null; audio.stream = null; audio.on = false;
+  stopMeter();
+  renderAudio(); render();
+}
+function toggleMic() { if (audio.on) micOff(); else micOn(); }
+
+function startMeter() {
+  stopMeter();
+  const a = audio.nodes.analyser;
+  const buf = new Float32Array(a.fftSize);
+  const bar = $('#micMeter');
+  const loop = () => {
+    a.getFloatTimeDomainData(buf);
+    let peak = 0;
+    for (const v of buf) peak = Math.max(peak, Math.abs(v));
+    bar.style.width = Math.min(100, peak * 100) + '%';
+    bar.classList.toggle('hot', peak > 0.95);
+    audio.meterRaf = requestAnimationFrame(loop);
+  };
+  loop();
+}
+function stopMeter() {
+  cancelAnimationFrame(audio.meterRaf);
+  $('#micMeter').style.width = '0';
+}
+
+async function refreshDevices() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+  let list = [];
+  try { list = await navigator.mediaDevices.enumerateDevices(); } catch { return; }
+  fillSelect($('#micSel'), list.filter((d) => d.kind === 'audioinput'), audio.s.micId, '麥克風');
+  fillSelect($('#outSel'), list.filter((d) => d.kind === 'audiooutput'), audio.s.outId, '輸出');
+}
+function fillSelect(sel, devs, chosen, word) {
+  const opts = [el('option', { value: '', text: '系統預設' })];
+  devs.filter((d) => d.deviceId && d.deviceId !== 'default' && d.deviceId !== 'communications')
+    .forEach((d, i) => opts.push(el('option', { value: d.deviceId, text: d.label || `${word} ${i + 1}` })));
+  sel.replaceChildren(...opts);
+  sel.value = opts.some((o) => o.value === chosen) ? chosen : '';
+}
+
+function renderAudio() {
+  const s = audio.s;
+  $('#micToggle').textContent = audio.on ? '關閉麥克風' : '開啟麥克風';
+  $('#micToggle').className = 'small' + (audio.on ? '' : ' primary');
+  $('#rMic').value = s.micVol; $('#vMic').textContent = s.micVol + '%';
+  $('#rEcho').value = s.echo; $('#vEcho').textContent = s.echo;
+  $('#rRev').value = s.reverb; $('#vRev').textContent = s.reverb;
+  $('#rMusic').value = s.music; $('#vMusic').textContent = s.music;
+  $('#outSel').disabled = !canPickOutput;
+  $('#outNote').textContent = canPickOutput
+    ? '麥克風的聲音從這裡出來。選你的監聽耳機。'
+    : '這個瀏覽器不能指定輸出裝置，麥克風聲音會走系統預設。要指定請用 Chrome 或 Edge。';
+  if (audio.ctx) {
+    const ms = Math.round(((audio.ctx.baseLatency || 0) + (audio.ctx.outputLatency || 0)) * 1000);
+    $('#latency').textContent = ms
+      ? `瀏覽器回報的輸出延遲約 ${ms} 毫秒，還不含麥克風輸入端和音效卡的延遲。`
+      : '';
+  } else $('#latency').textContent = '';
+}
+
+// =====================================================================
+// 畫面
+// =====================================================================
+function songRow(info, acts, extraClass = '', num = null, onOpen = null) {
+  const blocked = state.blocked.has(info.videoId);
+  const m = state.meta[info.videoId] || {};
+  return el('div', { class: 'row ' + extraClass },
+    num != null ? el('div', { class: 'num', text: num }) : null,
+    el('img', { src: info.thumb || thumbOf(info.videoId), alt: '', loading: 'lazy' }),
+    el('div', {
+      class: 'info' + (onOpen ? ' click' : ''), title: onOpen ? '設定伴唱版和歌詞' : '',
+      onclick: onOpen || (() => {}),
+    },
+      el('div', { class: 't', text: info.title }),
+      el('div', { class: 'c' }, info.channel || '',
+        m.karaoke ? el('span', { class: 'badge', text: '伴唱' }) : null,
+        m.lrc ? el('span', { class: 'badge', text: '歌詞' }) : null,
+        blocked ? el('span', { class: 'tag', text: '　無法嵌入' }) : null),
+    ),
+    acts,
+  );
+}
+
+function renderQueue() {
+  const pane = $('#pane-queue');
+  pane.replaceChildren();
+  if (state.current) {
+    const cur = state.current;
+    pane.append(el('div', { class: 'paneHead', text: '正在唱' }));
+    pane.append(songRow(cur, el('div'), 'playing', null, () => openSongDlg(cur)));
+  }
+  pane.append(el('div', { class: 'paneHead' },
+    el('span', { text: `待唱 ${state.queue.length} 首` }),
+    state.queue.length ? el('button', {
+      class: 'small', text: '清空',
+      onclick: () => { if (confirm('清空所有待唱的歌？')) { state.queue = []; save(); render(); } },
+    }) : null,
+  ));
+  if (!state.queue.length) pane.append(el('div', { class: 'msg', text: '還沒有點歌。' }));
+  state.queue.forEach((it, i) => {
+    pane.append(songRow(it, el('div', { class: 'acts h' },
+      el('button', { class: 'small', text: '⤒', title: '置頂（下一首唱）', disabled: i === 0, onclick: () => moveQueue(i, 0) }),
+      el('button', { class: 'small', text: '↑', disabled: i === 0, onclick: () => moveQueue(i, i - 1) }),
+      el('button', { class: 'small', text: '↓', disabled: i === state.queue.length - 1, onclick: () => moveQueue(i, i + 1) }),
+      el('button', { class: 'small', text: '✕', title: '刪除', onclick: () => removeQueue(i) }),
+    ), '', i + 1, () => openSongDlg(it)));
+  });
+}
+
+function renderHistory() {
+  const pane = $('#pane-history');
+  pane.replaceChildren();
+  if (!state.history.length) { pane.append(el('div', { class: 'msg', text: '還沒唱過歌。' })); return; }
+  pane.append(el('div', { class: 'paneHead' },
+    el('span', { text: `最近 ${state.history.length} 首` }),
+    el('button', {
+      class: 'small', text: '清除紀錄',
+      onclick: () => { if (confirm('清除所有唱過的紀錄？')) { state.history = []; save(); render(); } },
+    }),
+  ));
+  for (const h of state.history) {
+    const info = { videoId: h.videoId, title: h.untitled ? '' : h.title, channel: h.channel, thumb: h.thumb };
+    pane.append(songRow(h, el('div', { class: 'acts' },
+      el('button', { class: 'small primary', text: '再點', onclick: () => addSong(info) }),
+    )));
+  }
+}
+
+function renderIdle() {
+  const idle = $('#idle');
+  if (state.current) { idle.classList.add('hidden'); return; }
+  idle.classList.remove('hidden');
+  idle.replaceChildren();
+  if (FILE_MODE) {
+    idle.append(
+      el('div', { text: '請用 start.cmd 開啟' }),
+      el('div', { class: 'idleNote' },
+        '直接雙擊 index.html 開的網頁，瀏覽器不會告訴 YouTube 影片放在哪個網頁，',
+        'YouTube 就會拒絕播放（錯誤 153）。',
+        el('br'),
+        '請雙擊同一個資料夾裡的 ', el('code', { text: 'start.cmd' }),
+        '，它會用 ', el('code', { text: LOCAL_URL }), ' 開啟這個頁面。',
+        '新網址的待唱清單和設定會從空的開始。'),
+    );
+    return;
+  }
+  if (stopNote) idle.append(el('div', { class: 'idleNote', text: stopNote }));
+  if (!playerReady) {
+    idle.append(el('div', { text: playerFailed ? 'YouTube 播放器載入失敗，請檢查網路後重新整理' : '播放器載入中…' }));
+  } else if (state.queue.length) {
+    idle.append(el('button', { class: 'primary', text: `開始唱（${state.queue.length} 首待唱）`, onclick: playNext }));
+  } else if (!stopNote) {
+    idle.append(el('div', { text: '貼一首歌的連結，開始唱吧 🎤' }));
+  }
+}
+
+function render() {
+  renderIdle();
+  renderQueue();
+  renderHistory();
+  drawLyrics();
+  $('#qCount').textContent = state.queue.length ? `(${state.queue.length})` : '';
+  $('#nowTitle').textContent = state.current ? state.current.title : '尚未播放';
+  const nxt = state.queue[0];
+  $('#nextTitle').textContent = nxt ? '下一首：' + nxt.title : (state.current ? '後面沒有歌了' : '');
+  const fsNext = $('#fsNext');
+  fsNext.textContent = nxt ? '下一首：' + nxt.title : '';
+  fsNext.classList.toggle('has', !!nxt);
+  const has = !!state.current;
+  for (const id of ['#btnRestart', '#btnPause', '#fsRestart']) $(id).disabled = !has;
+  $('#btnSkip').disabled = $('#fsSkip').disabled = !has && !state.queue.length;
+
+  const kara = state.mode === 'karaoke';
+  for (const id of ['#btnVocal', '#fsVocal']) {
+    $(id).textContent = kara ? '伴唱' : '原唱';
+    $(id).classList.toggle('on', kara);
+  }
+  $('#btnMic').textContent = audio.on ? '麥克風 開' : '麥克風';
+  $('#btnMic').classList.toggle('on', audio.on);
+}
+
+function showTab(name) {
+  document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
+  document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('on', p.id === 'pane-' + name));
+}
+
+// =====================================================================
+// YouTube 播放器
+// =====================================================================
+let player = null;
+let playerReady = false;
+let playerFailed = false;
+let stopNote = '';    // 播放被迫停下來的原因，顯示在影片區
+let failStreak = 0;   // 連續播不出來的首數，有一首播成功就歸零
+
+window.onYouTubeIframeAPIReady = function () {
+  player = new YT.Player('player', {
+    width: '100%', height: '100%',
+    playerVars: { rel: 0, playsinline: 1, autoplay: 0 },
+    events: {
+      onReady: () => { playerReady = true; applyLevels(); render(); },
+      onStateChange: onPlayerState,
+      onError: onPlayerError,
+    },
+  });
+};
+
+function onPlayerState(e) {
+  if (e.data === YT.PlayerState.ENDED) { playNext(); return; }
+  if (e.data === YT.PlayerState.PLAYING) {
+    $('#btnPause').textContent = '暫停';
+    failStreak = 0; stopNote = '';
+    const cur = state.current;
+    if (!cur) return;
+    const d = player.getVideoData && player.getVideoData();
+    if (d && cur.untitled && d.video_id === cur.playing) updateTitle(cur.uid, d.title, d.author);
+    if (lyr.uid === cur.uid && lyr.autoPending && !cur.untitled) {
+      lyr.autoPending = false;
+      autoLyrics(cur, player.getDuration());
+    }
+  } else if (e.data === YT.PlayerState.PAUSED) {
+    $('#btnPause').textContent = '播放';
+  }
+}
+
+const ERR_REASON = {
+  2: '影片網址有誤', 5: '瀏覽器的播放器出錯', 100: '影片已刪除或設為私人',
+  101: '上傳者不允許在其他網站播放', 150: '上傳者不允許在其他網站播放',
+};
+
+function onPlayerError(e) {
+  const cur = state.current;
+  const code = e.data;
+  // 153：YouTube 沒收到 Referer，不是這首歌的問題，換哪首都一樣，別把待唱清單一路跳光
+  if (code === 153) {
+    stopPlayback(FILE_MODE ? '' :
+      'YouTube 拒絕播放（錯誤 153）：瀏覽器沒有送出網頁來源（Referer），' +
+      '可能被隱私設定或擴充功能擋掉了。關掉之後重新整理再試。');
+    return;
+  }
+  const notEmbeddable = [100, 101, 150].includes(code);
+  // 伴唱版壞掉：記下來，改播原唱，不跳歌
+  if (cur && cur.playing && cur.playing !== cur.videoId) {
+    if (notEmbeddable) state.blocked.add(cur.playing);
+    toast('伴唱版無法播放，改播原唱');
+    loadVersion(cur, cur.videoId);
+    return;
+  }
+  if (notEmbeddable && cur) {
+    state.blocked.add(cur.videoId);
+    state.history = state.history.filter((h) => h.uid !== cur.uid);
+  } else if (++failStreak >= 3) {
+    // 連續好幾首都播不出來，多半是網路或瀏覽器的問題，不是歌的問題
+    stopPlayback(`連續 ${failStreak} 首播不出來（錯誤 ${code}），先停下來。檢查網路後按「開始唱」再試一次。`);
+    return;
+  }
+  toast(`《${cur ? cur.title : '這首'}》無法播放（${ERR_REASON[code] || '錯誤 ' + code}），自動跳下一首`);
+  playNext();
+}
+
+// 停止播放，把這首放回待唱第一首
+function stopPlayback(note) {
+  const cur = state.current;
+  if (cur) {
+    state.history = state.history.filter((h) => h.uid !== cur.uid);
+    state.queue.unshift(cur);
+  }
+  state.current = null;
+  stopNote = note;
+  failStreak = 0;
+  try { player.stopVideo(); } catch { /* 忽略 */ }
+  clearLyrics();
+  save(); render();
+}
+
+// =====================================================================
+// 全螢幕
+// =====================================================================
+function toggleFs() {
+  const wrap = $('#playerWrap');
+  if (document.fullscreenElement) document.exitFullscreen();
+  else if (wrap.requestFullscreen) wrap.requestFullscreen();
+}
+document.addEventListener('fullscreenchange', () => {
+  $('#playerWrap').classList.toggle('fs', document.fullscreenElement === $('#playerWrap'));
+});
+
+// =====================================================================
+// 事件
+// =====================================================================
+$('#searchForm').addEventListener('submit', (e) => { e.preventDefault(); submitLink(false); });
+$('#btnInsert').addEventListener('click', () => submitLink(true));
+document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
+
+$('#btnSkip').addEventListener('click', playNext);
+$('#fsSkip').addEventListener('click', playNext);
+$('#btnRestart').addEventListener('click', restart);
+$('#fsRestart').addEventListener('click', restart);
+$('#btnPause').addEventListener('click', togglePause);
+$('#btnVocal').addEventListener('click', toggleVocal);
+$('#fsVocal').addEventListener('click', toggleVocal);
+$('#btnMic').addEventListener('click', toggleMic);
+$('#btnFs').addEventListener('click', toggleFs);
+$('#fsExit').addEventListener('click', toggleFs);
+$('#lyLater').addEventListener('click', () => nudgeLyrics(-0.5));
+$('#lyEarlier').addEventListener('click', () => nudgeLyrics(0.5));
+$('#lyMore').addEventListener('click', () => { if (state.current) openSongDlg(state.current); });
+
+document.addEventListener('keydown', (e) => {
+  if (e.target.matches('input, textarea, select') || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (document.querySelector('dialog[open]')) return;
+  const k = e.key.toLowerCase();
+  if (k === 'n') playNext();
+  else if (k === 'r') restart();
+  else if (k === 'v') toggleVocal();
+  else if (k === 'm') toggleMic();
+  else if (k === '[') nudgeLyrics(-0.5);
+  else if (k === ']') nudgeLyrics(0.5);
+});
+
+// 設定
+const dlg = $('#settings');
+$('#btnSettings').addEventListener('click', () => dlg.showModal());
+$('#btnCloseSettings').addEventListener('click', () => dlg.close());
+$('#btnClearBlocked').addEventListener('click', () => {
+  state.blocked.clear(); save(); render(); toast('已清除');
+});
+
+// 音訊
+$('#btnAudio').addEventListener('click', async () => {
+  renderAudio();
+  $('#audioDlg').showModal();
+  await refreshDevices();
+});
+$('#audioClose').addEventListener('click', () => $('#audioDlg').close());
+$('#micToggle').addEventListener('click', toggleMic);
+$('#micSel').addEventListener('change', async (e) => {
+  audio.s.micId = e.target.value; saveAudio();
+  if (audio.on) { micOff(); await micOn(); }
+});
+$('#outSel').addEventListener('change', async (e) => {
+  audio.s.outId = e.target.value; saveAudio();
+  await applyOutput(audio.s.outId);
+});
+for (const [id, key] of [['#rMic', 'micVol'], ['#rEcho', 'echo'], ['#rRev', 'reverb'], ['#rMusic', 'music']]) {
+  $(id).addEventListener('input', (e) => {
+    audio.s[key] = Number(e.target.value);
+    applyLevels(); renderAudio();
+  });
+  $(id).addEventListener('change', saveAudio);
+}
+if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+  navigator.mediaDevices.addEventListener('devicechange', refreshDevices);
+}
+
+// 這首歌
+$('#sdClose').addEventListener('click', () => $('#songDlg').close());
+$('#sdKaraokeSave').addEventListener('click', saveKaraoke);
+$('#sdKaraokeDel').addEventListener('click', removeKaraoke);
+$('#sdLrcForm').addEventListener('submit', (e) => { e.preventDefault(); sdSearch($('#sdLrcQ').value); });
+$('#sdLrcApply').addEventListener('click', () => {
+  const text = $('#sdLrcText').value;
+  if (!parseLRC(text).length) { toast('看不到時間標記，格式像 [00:12.30]歌詞'); return; }
+  useLrc(sdItem, { id: null, track: '手動貼上的歌詞', artist: '', duration: 0, synced: text });
+});
+$('#sdLrcClear').addEventListener('click', () => {
+  const m = metaOf(sdItem.videoId);
+  m.lrc = null; m.lrcTried = true;
+  saveMeta();
+  if (isCurrent(sdItem)) applyLyrics(sdItem);
+  renderSdStatus(); renderQueue();
+  toast('這首不顯示歌詞了');
+});
+
+save();
+render();
+</script>
+<script src="https://www.youtube.com/iframe_api"
+  onerror="playerFailed = true; render();"></script>
+</body>
+</html>
