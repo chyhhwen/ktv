@@ -287,7 +287,9 @@
   dialog summary { cursor: pointer; font-size: 14px; color: var(--primary); }
   dialog details textarea { margin: 8px 0; }
   #songDlg, #audioDlg { width: min(640px, 94vw); max-height: 90vh; }
-  #sdLrcList { max-height: 260px; overflow-y: auto; margin-top: 8px; }
+  #sdLrcList, #sdKList { max-height: 260px; overflow-y: auto; margin-top: 8px; }
+  .kStatus { display: flex; gap: 8px; align-items: center; }
+  .kStatus .note { flex: 1; min-width: 0; }
 
   .field {
     display: grid; grid-template-columns: 96px 1fr 56px; gap: 12px;
@@ -371,7 +373,7 @@
     <div id="hint">
       在 YouTube 找到歌、複製網址貼上來。
       打歌名按 Enter，會在新分頁幫你開 YouTube 搜尋。
-      點清單裡的歌名可以設定伴唱版和歌詞。
+      按「原唱」切到伴唱會自動找伴唱版；點清單裡的歌名可以換一支，或改歌詞。
     </div>
     <div class="tabs">
       <button data-tab="queue" class="on">待唱 <span id="qCount"></span></button>
@@ -445,12 +447,15 @@
   <h2 id="sdTitle"></h2>
 
   <h3>伴唱版</h3>
-  <p class="note">貼上同一首歌的 KTV／伴奏版 YouTube 連結，就能用「原唱／伴唱」鍵切換。</p>
-  <div class="inline">
-    <input id="sdKaraoke" type="text" placeholder="伴唱版 YouTube 連結">
-    <button id="sdKaraokeSave" class="primary">儲存</button>
-    <button id="sdKaraokeDel">移除</button>
+  <div class="kStatus">
+    <p id="sdKStatus" class="note"></p>
+    <button id="sdKDel" class="small">移除</button>
   </div>
+  <form id="sdKForm" class="inline" autocomplete="off">
+    <input id="sdKQ" type="text" placeholder="搜尋伴唱版，或貼上 YouTube 連結">
+    <button type="submit" class="primary">搜尋</button>
+  </form>
+  <div id="sdKList"></div>
 
   <h3>歌詞</h3>
   <p id="sdLrcStatus" class="note"></p>
@@ -611,7 +616,7 @@ const NOISE = new RegExp([
   'lyrics?', 'm\\/?v', 'audio', 'visualizer', 'hd', '4k', 'hq', 'karaoke', 'ktv',
   '官方(完整版|高畫質|頻道)?', '高畫質', '完整版', '動態歌詞', '歌詞版?', '中字', '字幕', '伴奏', '伴唱',
 ].map((s) => '(?:^|\\s|[|/｜])' + s + '(?=$|\\s|[|/｜])').join('|'), 'gi');
-const CJK_NOISE = /官方(完整版|高畫質|頻道|版)?|高畫質|完整版|動態歌詞|歌詞版?|中字|字幕|伴奏版?|伴唱版?|卡拉OK/gi;
+const CJK_NOISE = /官方(完整版|高畫質|頻道|版)?|專屬頻道|頻道|高畫質|完整版|動態歌詞|歌詞版?|中字|字幕|伴奏版?|伴唱版?|卡拉OK/gi;
 const BRACKETS = /[【「『《\[〔]([^】」』》\]〕]*)[】」』》\]〕]/g;
 
 function tidy(s) {
@@ -626,7 +631,9 @@ function tidy(s) {
 }
 
 function cleanTitle(title, channel) {
-  const raw = String(title || '').replace(/[(（][^)）]*[)）]/g, ' ');
+  // 括號拿掉；【MV】【KTV】這種裡面只有雜訊的方括號也拿掉
+  const raw = String(title || '').replace(/[(（][^)）]*[)）]/g, ' ')
+    .replace(BRACKETS, (all, inner) => (tidy(inner) ? all : ' '));
   let track = '', artist = '';
   // 1) 括號標題：周杰倫 Jay Chou【晴天 Sunny Day】Official MV
   const groups = [...raw.matchAll(BRACKETS)];
@@ -790,6 +797,218 @@ function nudgeLyrics(d) {
 setInterval(tickLyrics, 100);
 
 // =====================================================================
+// YouTube 搜尋：瀏覽器不能直接呼叫 YouTube 的搜尋，要經過 server.js 轉送（start.cmd 會開它）
+// =====================================================================
+const YT_CLIENT = { clientName: 'WEB', clientVersion: '2.20251120.01.00', hl: 'zh-TW', gl: 'TW' };
+let ytSearchOK = null;       // false：這個伺服器不會轉送（例如用 python -m http.server 開的）
+const ytCache = new Map();   // 關鍵字 → 結果；開著的時候同樣的關鍵字不重複搜尋
+
+// 失敗時丟出的錯誤訊息：'nosearch'（伺服器不會轉送）、'offline'（連不上伺服器）、'HTTP 狀態碼'
+async function ytSearch(query) {
+  const q = query.trim();
+  if (ytCache.has(q)) return ytCache.get(q);
+  if (ytSearchOK === false) throw new Error('nosearch');
+  let r;
+  try {
+    r = await fetch('api/yt/search', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ context: { client: YT_CLIENT }, query: q }),
+    });
+  } catch { throw new Error('offline'); }
+  if (!r.headers.get('X-KTV-Relay')) { ytSearchOK = false; throw new Error('nosearch'); }
+  ytSearchOK = true;
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const list = parseYtResults(await r.json());
+  ytCache.set(q, list);
+  return list;
+}
+
+const ytText = (t) => (t ? t.simpleText || (t.runs || []).map((x) => x.text).join('') : '');
+const ytResultsUrl = (q) => 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q);
+
+// 搜尋結果是一大包巢狀 JSON，影片都在 videoRenderer 裡；直播、首播沒有長度，跳過
+function parseYtResults(json) {
+  const out = [], seen = new Set();
+  (function walk(o) {
+    if (!o || typeof o !== 'object') return;
+    if (Array.isArray(o)) { o.forEach((x) => walk(x)); return; }
+    for (const [k, v] of Object.entries(o)) {
+      if (k !== 'videoRenderer') { walk(v); continue; }
+      const len = ytText(v && v.lengthText);
+      if (!v || !v.videoId || seen.has(v.videoId) || !/^\d+(:\d\d)+$/.test(len)) continue;
+      seen.add(v.videoId);
+      out.push({
+        videoId: v.videoId, title: ytText(v.title),
+        channel: ytText(v.ownerText) || ytText(v.longBylineText),
+        seconds: len.split(':').reduce((a, x) => a * 60 + Number(x), 0),
+      });
+    }
+  })(json);
+  return out;
+}
+
+// oEmbed 不用金鑰、網頁可以直接呼叫：拿標題，也順便知道能不能嵌入（不允許嵌入的會回 401）
+const NO_EMBED = [400, 401, 403, 404];
+async function oembed(id) {
+  try {
+    const r = await fetch('https://www.youtube.com/oembed?format=json&url=' +
+      encodeURIComponent('https://www.youtube.com/watch?v=' + id));
+    return { status: r.status, data: r.ok ? await r.json() : null };
+  } catch { return { status: 0, data: null }; }   // 連不上就先當作能播，交給播放器判斷
+}
+async function playable(id) { return !NO_EMBED.includes((await oembed(id)).status); }
+
+// =====================================================================
+// 伴唱版：用歌名到 YouTube 找 KTV／伴奏版，從標題挑最像的一支
+// =====================================================================
+const KARA_YES = /伴奏|伴唱|純音樂|纯音乐|去人聲|去人声|無人聲|无人声|消音|卡拉\s*ok|karaoke|instrumental|off\s*vocal|no\s*guide|オフボーカル|カラオケ|ガイドなし|노래방|\binst\b/i;
+// 有人聲（導唱）、改編過、或聲道分左右的版本都不要
+const KARA_NO = new RegExp([
+  '導唱', '导唱', '原唱版', '含原唱', 'on\\s*vocal', '歌入り', 'ガイド(?:メロディ)?(?:あり|付)', 'with\\s*vocals?', 'cover', '翻唱', '\\blive\\b', '現場', '现场', '演唱會', '演唱会', 'reaction', '教學', '教学',
+  'tutorial', '吉他', 'guitar', '鋼琴', '钢琴', 'piano', 'ukulele', '烏克麗麗', '爵士鼓', 'drum', 'remix', '\\bdj\\b',
+  '抖音', '加速', 'sped\\s*up', 'nightcore', '慢速', 'slowed', '\\b8d\\b', '小時', '小时', '\\bhours?\\b',
+  '循環', '循环', '合集', '串燒', '串烧', 'medley', 'mashup', '聲道', '声道', '\\b[lr]\\s*[/／\\s]\\s*[lr]\\b',
+  'acoustic', 'アコースティック', 'カバー', '歌ってみた', '弾き語り', '커버',
+].join('|'), 'i');
+// 改過調的（男生版、降 Key、+4 之類）
+const KARA_KEY = /[降升]\s*(?:key|調|调)|[男女]\s*(?:key|調|调|版|生版)|[男女]性\s*キー|(?:lower|higher)\s*key|key\s*(?:up|down)|[+\-−]\s*\d+\s*(?:key|키|キー)|[(（]\s*[+\-−]\s*\d+\s*[)）]/i;
+const isKaraTitle = (t) => KARA_YES.test(t) || /\bMR\b/.test(t);
+// 帶導唱旋律的也不要，但「No Guide Melody」是好的
+const isBadKara = (t) => KARA_NO.test(t) || (/guide\s*(?:vocal|melody)/i.test(t) && !/no\s*guide/i.test(t));
+// 點歌時貼的就已經是伴奏影片，不用另外找
+const looksKaraoke = (t) => isKaraTitle(t) && !isBadKara(t);
+const normText = (s) => String(s || '').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
+
+function karaokeQuery(item) {
+  const { track, artist } = cleanTitle(item.title, item.channel);
+  const t = item.title;
+  const word = /[぀-ヿ]/.test(t) ? 'カラオケ' : /[가-힯]/.test(t) ? '노래방'
+    : CJK.test(t) ? '伴奏' : 'karaoke';
+  return ([track, artist].filter(Boolean).join(' ') || tidy(t) || t) + ' ' + word;
+}
+
+// 幫搜尋結果打分數：標題要有伴奏、KTV 之類的字，還要有歌名；長度跟原唱越接近越好。
+// ok 的才會被自動挑中；不 ok 的還是會列在歌曲設定裡讓人自己選。
+function rankKaraoke(list, item) {
+  const m = state.meta[item.videoId] || {};
+  const { track, artist } = cleanTitle(item.title, item.channel);
+  const nTrack = normText(track), nArtist = normText(artist);
+  const rejected = new Set(m.kNo || []);
+  return list
+    .filter((c) => c.videoId !== item.videoId && !state.blocked.has(c.videoId))
+    .map((c, i) => {
+      const t = c.title, nt = normText(t);
+      const yes = isKaraTitle(t), ktv = /ktv/i.test(t), bad = isBadKara(t);
+      let s = yes ? 4 : ktv ? 2 : 0;
+      if (bad) s -= 6;
+      if (KARA_KEY.test(t)) s -= 3;
+      if (nTrack && nt.includes(nTrack)) s += 3;
+      if (nArtist && nt.includes(nArtist)) s += 1;
+      if (m.dur) {
+        const d = Math.abs(c.seconds - m.dur);
+        s += d <= 5 ? 2 : d <= 15 ? 1.5 : d <= 30 ? 1 : d > 120 ? -4 : 0;
+      }
+      const lenOK = c.seconds >= 60 && c.seconds <= 900;
+      if (!lenOK) s -= 6;
+      return { ...c, i, score: s, ok: (yes || ktv) && !bad && lenOK && s >= 4 && !rejected.has(c.videoId) };
+    })
+    .sort((a, b) => (b.ok - a.ok) || (b.score - a.score) || (a.i - b.i));
+}
+
+// 設定伴唱版；正在唱這首、而且在伴唱模式就直接切過去。回傳有沒有切
+function setKaraoke(item, c, auto) {
+  const m = metaOf(item.videoId);
+  m.karaoke = c.videoId;
+  m.karaokeInfo = { title: c.title || '', channel: c.channel || '', seconds: c.seconds || 0 };
+  m.karaokeAuto = !!auto;
+  m.karaokeTried = true;
+  saveMeta();
+  const cur = state.current;
+  const sw = !!(cur && cur.videoId === item.videoId && state.mode === 'karaoke' &&
+    playerReady && cur.playing !== c.videoId);
+  if (sw) loadVersion(cur, c.videoId);
+  render();
+  if (sdItem && sdItem.videoId === item.videoId) renderSdKaraoke();
+  return sw;
+}
+
+function removeKaraoke(item) {
+  const m = metaOf(item.videoId);
+  const had = m.karaoke;
+  if (!had) return;
+  m.kNo = [had, ...(m.kNo || []).filter((x) => x !== had)].slice(0, 10);   // 自動找時別再挑它
+  m.karaoke = null; m.karaokeInfo = null; m.karaokeAuto = false; m.karaokeTried = true;
+  saveMeta();
+  const cur = state.current;
+  if (cur && cur.videoId === item.videoId && cur.playing === had && playerReady) loadVersion(cur, cur.videoId);
+  render();
+  if (sdItem && sdItem.videoId === item.videoId) renderSdKaraoke();
+  toast('已移除伴唱版');
+}
+
+const kPending = new Map();   // 原唱影片 ID → 正在找伴唱版的 Promise
+const kAuto = new Set();      // 這次開著的時候已經自動找過的歌
+
+// 幫這首找一支伴唱版（已經有的話不動）。找不到時 Promise 照樣完成，用 karaokeOf() 看結果
+function findKaraoke(item) {
+  const vid = item.videoId;
+  if (kPending.has(vid)) return kPending.get(vid);
+  const p = (async () => {
+    const list = rankKaraoke(await ytSearch(karaokeQuery(item)), item);
+    let pick = null, blockedMore = false;
+    for (const c of list.filter((x) => x.ok).slice(0, 4)) {
+      if (await playable(c.videoId)) { pick = c; break; }
+      state.blocked.add(c.videoId); blockedMore = true;   // 不允許嵌入，以後也別挑
+    }
+    if (blockedMore) save();
+    const m = metaOf(vid);
+    m.karaokeTried = true;
+    if (pick && !m.karaoke) {
+      if (setKaraoke(item, pick, true)) toast('伴唱：' + pick.title);
+    } else saveMeta();
+  })();
+  kPending.set(vid, p);
+  const done = () => kPending.delete(vid);
+  p.then(done, done);
+  return p;
+}
+
+// 點歌、輪到這首、開始播的時候，在背景先幫還沒找過的歌找好，按「伴唱」時就不用等
+function maybeAutoKaraoke(item) {
+  if (!item || item.untitled || ytSearchOK === false || kAuto.has(item.videoId)) return null;
+  const m = state.meta[item.videoId];
+  if ((m && (m.karaoke || m.karaokeTried)) || looksKaraoke(item.title)) return null;
+  kAuto.add(item.videoId);
+  const p = findKaraoke(item);
+  p.catch(() => {});
+  return p;
+}
+
+// 伴唱模式下輪到一首還沒有伴唱版的歌：先播原唱，同時去找（找到會自動切過去）
+function karaokeFallback(item) {
+  if (state.mode !== 'karaoke' || item.playing !== item.videoId || looksKaraoke(item.title)) return;
+  const p = kPending.get(item.videoId) || maybeAutoKaraoke(item);
+  const tell = () => { if (isCurrent(item) && !karaokeOf(item)) toast('這首找不到伴唱版，先播原唱'); };
+  if (p) p.then(tell, tell);
+  else if (!item.untitled) tell();
+}
+
+// 按了「伴唱」但這首還沒有伴唱版：馬上找
+async function karaokeNow(item) {
+  if (looksKaraoke(item.title)) { toast('這首本身看起來就是伴唱版'); return; }
+  if (item.untitled) { toast('還在讀歌名，讀到之後會自動找伴唱版'); return; }
+  toast('找伴唱版中…');
+  try { await findKaraoke(item); }
+  catch (e) {
+    toast(e.message === 'nosearch' ? '這首還沒有伴唱版，按歌詞旁的「⋯」可以貼連結'
+      : e.message === 'offline' ? '連不上 KTV 的伺服器，沒辦法找伴唱版'
+      : '搜尋伴唱版失敗，等一下再試');
+    return;
+  }
+  if (!karaokeOf(item)) toast('找不到伴唱版，按歌詞旁的「⋯」可以換關鍵字找');
+}
+
+// =====================================================================
 // 點歌與播放
 // =====================================================================
 function makeItem(info) {
@@ -808,24 +1027,18 @@ function addSong(info, front = false) {
   if (!state.current && playerReady && !FILE_MODE) playNext();
   else toast(front ? `插播：${item.title}` : `已點：${item.title}`);
   render();
+  maybeAutoKaraoke(item);
   return item;
 }
 
-async function fetchTitle(id) {
-  try {
-    const u = 'https://www.youtube.com/oembed?format=json&url=' +
-      encodeURIComponent('https://www.youtube.com/watch?v=' + id);
-    const r = await fetch(u);
-    if (r.ok) return await r.json();
-  } catch { /* 忽略 */ }
-  return null;
-}
+async function fetchTitle(id) { return (await oembed(id)).data; }
 
 async function addFromId(id, front = false) {
   const item = addSong({ videoId: id }, front);
   if (!item) return;
   const j = await fetchTitle(id);
   if (j) updateTitle(item.uid, j.title, j.author_name);
+  maybeAutoKaraoke(item);
 }
 
 function updateTitle(itemUid, title, channel) {
@@ -859,6 +1072,9 @@ function playNext() {
     saveMeta();
     player.loadVideoById(next.playing);
     applyLyrics(next);
+    karaokeFallback(next);
+    maybeAutoKaraoke(next);
+    maybeAutoKaraoke(state.queue[0]);   // 順便幫下一首先找好
   } else {
     try { player.stopVideo(); } catch { /* 忽略 */ }
     clearLyrics();
@@ -883,17 +1099,17 @@ function toggleVocal() {
   state.mode = state.mode === 'karaoke' ? 'original' : 'karaoke';
   LS.set(K.mode, state.mode);
   const cur = state.current;
-  const label = state.mode === 'karaoke' ? '伴唱' : '原唱';
+  const kara = state.mode === 'karaoke';
+  const label = kara ? '伴唱' : '原唱';
   if (cur && playerReady) {
     const k = karaokeOf(cur);
     if (k) {
-      loadVersion(cur, state.mode === 'karaoke' ? k : cur.videoId);
+      loadVersion(cur, kara ? k : cur.videoId);
       toast(label);
-    } else if (state.mode === 'karaoke') {
-      toast('這首還沒設定伴唱版，按歌詞旁的「⋯」可以加');
-    } else toast(label);
+    } else if (kara) karaokeNow(cur);
+    else toast(label);
   } else {
-    toast(`之後的歌會播${label}${state.mode === 'karaoke' ? '（有設定伴唱版的話）' : ''}`);
+    toast(`之後的歌會播${label}${kara ? '（找得到伴唱版的話）' : ''}`);
   }
   render();
 }
@@ -927,8 +1143,7 @@ function submitLink(front) {
   }
   const q = raw.trim();
   if (!q) { $('#q').focus(); return; }
-  const url = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q);
-  window.open(url, '_blank', 'noopener');
+  window.open(ytResultsUrl(q), '_blank', 'noopener');
   $('#q').select();
   toast('這不是 YouTube 連結，已在新分頁幫你搜尋');
 }
@@ -938,19 +1153,125 @@ function submitLink(front) {
 // =====================================================================
 let sdItem = null;
 let sdResults = [];
+let sdK = { state: 'idle', list: [], err: '' };   // 伴唱版搜尋：idle / loading / done / error
 
 function openSongDlg(item) {
   sdItem = item;
   const m = state.meta[item.videoId] || {};
   $('#sdTitle').textContent = item.title;
-  $('#sdKaraoke').value = m.karaoke ? 'https://youtu.be/' + m.karaoke : '';
+  $('#sdKQ').value = m.kQuery || karaokeQuery(item);
+  sdK = { state: 'idle', list: [], err: '' };
   const { track, artist } = cleanTitle(item.title, item.channel);
   $('#sdLrcQ').value = m.query || [track, artist].filter(Boolean).join(' ');
   $('#sdLrcText').value = '';
   sdResults = [];
   $('#sdLrcList').replaceChildren();
+  renderSdKaraoke();
   renderSdStatus();
   $('#songDlg').showModal();
+  // 一打開就先搜一次，有現成的伴唱版可以挑，不用自己打字
+  if (!item.untitled && !looksKaraoke(item.title)) sdKSearch($('#sdKQ').value);
+}
+
+// ---- 伴唱版 ----
+function renderSdKaraoke() {
+  const item = sdItem;
+  const m = state.meta[item.videoId] || {};
+  const k = m.karaokeInfo || {};
+  $('#sdKStatus').textContent = m.karaoke
+    ? '目前使用：' + (k.title || 'youtu.be/' + m.karaoke) +
+      (k.seconds ? `（${fmtDur(k.seconds)}）` : '') + (m.karaokeAuto ? '，自動找的' : '')
+    : looksKaraoke(item.title) ? '這首本身看起來就是伴唱版，不用另外設定。'
+    : ytSearchOK === false ? '還沒有伴唱版。貼上伴唱版的 YouTube 連結就能用。'
+    : '還沒有伴唱版。從下面挑一支，或貼上 YouTube 連結。';
+  $('#sdKDel').hidden = !m.karaoke;
+  const list = $('#sdKList');
+  const msg = (text) => el('div', { class: 'msg', text });
+  if (sdK.state === 'loading') list.replaceChildren(msg('搜尋中…'));
+  else if (sdK.state === 'error') list.replaceChildren(...sdKErrorView(sdK.err));
+  else if (sdK.state === 'done' && !sdK.list.length) list.replaceChildren(msg('找不到。換個關鍵字試試。'));
+  else list.replaceChildren(...sdK.list.map((c) => {
+    const using = m.karaoke === c.videoId;
+    const diff = m.dur ? ` · 差 ${Math.round(Math.abs(c.seconds - m.dur))} 秒` : '';
+    return el('div', { class: 'row' },
+      el('img', { src: thumbOf(c.videoId), alt: '', loading: 'lazy' }),
+      el('div', { class: 'info' },
+        el('div', { class: 't', text: c.title }),
+        el('div', { class: 'c', text: `${c.channel} · ${fmtDur(c.seconds)}${diff}` }),
+      ),
+      el('button', {
+        class: 'small' + (using ? '' : ' primary'), text: using ? '使用中' : '使用', disabled: using,
+        onclick: () => sdKUse(item, c),
+      }),
+    );
+  }));
+}
+
+function sdKErrorView(err) {
+  const msg = (text) => el('div', { class: 'msg', text });
+  if (err === 'nosearch') return [
+    msg('現在這個網址開的 KTV 不能搜尋 YouTube。用 start.cmd 開（電腦要有 Node.js），就能直接在這裡挑伴唱版。'),
+    el('div', { class: 'msg' }, '也可以到 YouTube 找好伴唱版，把連結貼在上面的框框。 ',
+      el('button', {
+        class: 'small', text: '到 YouTube 找',
+        onclick: () => window.open(ytResultsUrl($('#sdKQ').value), '_blank', 'noopener'),
+      })),
+  ];
+  if (err === 'offline') return [msg('連不上 KTV 的伺服器。如果把黑色視窗關掉了，重新執行 start.cmd。')];
+  return [msg(`YouTube 搜尋失敗（${err}），等一下再試，或直接貼上 YouTube 連結。`)];
+}
+
+async function sdKSearch(raw) {
+  const item = sdItem, q = raw.trim();
+  if (!q) return;
+  const id = parseVideoId(q);
+  if (id) { sdKFromLink(item, id); return; }
+  sdK = { state: 'loading', list: [], err: '' };
+  renderSdKaraoke();
+  let res;
+  try { res = await ytSearch(q); }
+  catch (e) {
+    if (sdItem === item) { sdK = { state: 'error', list: [], err: e.message }; renderSdKaraoke(); }
+    return;
+  }
+  const m = metaOf(item.videoId);
+  if (q === karaokeQuery(item)) delete m.kQuery; else m.kQuery = q;   // 記住自己改過的關鍵字
+  saveMeta();
+  if (sdItem !== item) return;
+  sdK = { state: 'done', list: rankKaraoke(res, item).slice(0, 12), err: '' };
+  renderSdKaraoke();
+}
+
+async function sdKUse(item, c) {
+  if (!(await playable(c.videoId))) {
+    state.blocked.add(c.videoId); save();
+    sdK.list = sdK.list.filter((x) => x.videoId !== c.videoId);
+    renderSdKaraoke();
+    toast('這支不允許在其他網站播放，換一支吧');
+    return;
+  }
+  sdKPicked(item, c);
+}
+
+// 框框裡貼的是連結：直接用那支
+async function sdKFromLink(item, id) {
+  if (id === item.videoId) { toast('這是同一支影片，請貼伴唱版的連結'); return; }
+  const { status, data } = await oembed(id);
+  if (NO_EMBED.includes(status)) {
+    state.blocked.add(id); save();
+    toast(status === 401 ? '這支不允許在其他網站播放，換一支吧' : '找不到這支影片');
+    return;
+  }
+  sdKPicked(item, { videoId: id, title: data ? data.title : '', channel: data ? data.author_name : '', seconds: 0 });
+  $('#sdKQ').value = (state.meta[item.videoId] || {}).kQuery || karaokeQuery(item);
+}
+
+function sdKPicked(item, c) {
+  const sw = setKaraoke(item, c, false);
+  const cur = state.current;
+  toast(sw ? '已換成這支伴唱版'
+    : cur && cur.videoId === item.videoId && state.mode !== 'karaoke' ? '已設定，按「原唱」鍵可以切到伴唱'
+    : '已設定伴唱版');
 }
 
 function renderSdStatus() {
@@ -1022,31 +1343,6 @@ function useLrc(item, lrc) {
   if (sdResults.length) renderSdList();
   renderQueue();
   toast('已套用歌詞');
-}
-
-function saveKaraoke() {
-  const raw = $('#sdKaraoke').value.trim();
-  const m = metaOf(sdItem.videoId);
-  if (!raw) { removeKaraoke(); return; }
-  const id = parseVideoId(raw);
-  if (!id) { toast('看不懂這個連結，請貼 YouTube 影片網址'); return; }
-  if (id === sdItem.videoId) { toast('這是同一支影片，請貼伴唱版的連結'); return; }
-  m.karaoke = id;
-  saveMeta();
-  if (isCurrent(sdItem) && state.mode === 'karaoke' && playerReady) loadVersion(sdItem, id);
-  render();
-  toast(state.mode === 'karaoke' ? '已儲存伴唱版' : '已儲存，按「原唱」鍵可以切到伴唱');
-}
-
-function removeKaraoke() {
-  const m = metaOf(sdItem.videoId);
-  const had = m.karaoke;
-  m.karaoke = null;
-  saveMeta();
-  $('#sdKaraoke').value = '';
-  if (had && isCurrent(sdItem) && sdItem.playing === had && playerReady) loadVersion(sdItem, sdItem.videoId);
-  render();
-  if (had) toast('已移除伴唱版');
 }
 
 // =====================================================================
@@ -1375,10 +1671,17 @@ function onPlayerState(e) {
     if (!cur) return;
     const d = player.getVideoData && player.getVideoData();
     if (d && cur.untitled && d.video_id === cur.playing) updateTitle(cur.uid, d.title, d.author);
+    if (cur.playing === cur.videoId) {
+      // 記下原唱的長度，挑伴唱版時拿來比
+      const dur = Math.round(player.getDuration() || 0);
+      const m = metaOf(cur.videoId);
+      if (dur && m.dur !== dur) { m.dur = dur; saveMeta(); }
+    }
     if (lyr.uid === cur.uid && lyr.autoPending && !cur.untitled) {
       lyr.autoPending = false;
       autoLyrics(cur, player.getDuration());
     }
+    maybeAutoKaraoke(cur);
   } else if (e.data === YT.PlayerState.PAUSED) {
     $('#btnPause').textContent = '播放';
   }
@@ -1400,11 +1703,19 @@ function onPlayerError(e) {
     return;
   }
   const notEmbeddable = [100, 101, 150].includes(code);
-  // 伴唱版壞掉：記下來，改播原唱，不跳歌
+  // 伴唱版壞掉：記下來，改播原唱，不跳歌；是自動找的就換一支
   if (cur && cur.playing && cur.playing !== cur.videoId) {
-    if (notEmbeddable) state.blocked.add(cur.playing);
-    toast('伴唱版無法播放，改播原唱');
+    const bad = cur.playing;
+    const m = metaOf(cur.videoId);
+    const retry = notEmbeddable && m.karaoke === bad && m.karaokeAuto && state.mode === 'karaoke';
+    if (notEmbeddable) state.blocked.add(bad);
+    if (retry) { m.karaoke = null; m.karaokeInfo = null; saveMeta(); }
+    toast(retry ? '這支伴唱版不能播，換一支找找' : '伴唱版無法播放，改播原唱');
     loadVersion(cur, cur.videoId);
+    if (retry) {
+      const tell = () => { if (isCurrent(cur) && !karaokeOf(cur)) toast('找不到其他伴唱版，先播原唱'); };
+      findKaraoke(cur).then(tell, tell);
+    }
     return;
   }
   if (notEmbeddable && cur) {
@@ -1516,8 +1827,8 @@ if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
 
 // 這首歌
 $('#sdClose').addEventListener('click', () => $('#songDlg').close());
-$('#sdKaraokeSave').addEventListener('click', saveKaraoke);
-$('#sdKaraokeDel').addEventListener('click', removeKaraoke);
+$('#sdKForm').addEventListener('submit', (e) => { e.preventDefault(); sdKSearch($('#sdKQ').value); });
+$('#sdKDel').addEventListener('click', () => removeKaraoke(sdItem));
 $('#sdLrcForm').addEventListener('submit', (e) => { e.preventDefault(); sdSearch($('#sdLrcQ').value); });
 $('#sdLrcApply').addEventListener('click', () => {
   const text = $('#sdLrcText').value;
