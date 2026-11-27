@@ -521,7 +521,7 @@ const HISTORY_MAX = 100;
 const META_MAX = 300;
 // 直接雙擊 index.html（file://）開的網頁不會送 Referer，YouTube 會拒絕播放每一支影片（錯誤 153），
 // 要用 GitHub Pages 的 https 網址開。把網址填在這裡，雙擊 index.html 就會自動換過去。
-const SITE_URL = '';   // 例如 'https://帳號.github.io/儲存庫名稱/'
+const SITE_URL = 'https://chyhhwen.github.io/ktv/';   // 例如 'https://帳號.github.io/儲存庫名稱/'
 const FILE_MODE = location.protocol === 'file:';
 if (FILE_MODE && SITE_URL) location.replace(SITE_URL);
 
