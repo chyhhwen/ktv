@@ -10,7 +10,9 @@
 
 要透過本機網頁伺服器，用 **http://localhost:8766/** 開啟。直接雙擊 `index.html`（`file://`）開的網頁不會送出 Referer，YouTube 會拒絕播放每一首歌（錯誤 153）。
 
-在這個資料夾裡執行其中一個指令，再用瀏覽器打開 http://localhost:8766/ 。
+Windows 直接雙擊資料夾裡的 `start.cmd` 就好：它會用電腦上的 Python 或 Node.js 開伺服器，再自動打開瀏覽器。唱完把那個黑色視窗關掉即可。
+
+其他系統，或想自己開的話，在這個資料夾裡執行其中一個指令，再用瀏覽器打開 http://localhost:8766/ 。
 
 有 Node.js（第一次執行會問要不要安裝 `serve`，按 `y`）：
 

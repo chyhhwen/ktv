@@ -479,10 +479,6 @@
     游標點在影片上時快捷鍵無效，點一下影片以外的地方就好。
   </p>
   <p style="font-size:14px;line-height:1.7;color:var(--muted)">
-    請雙擊資料夾裡的 <code>start.cmd</code> 開啟（網址是 http://localhost:8766）。
-    直接雙擊 index.html 開的話，YouTube 會拒絕播放每一首歌（錯誤 153）。
-  </p>
-  <p style="font-size:14px;line-height:1.7;color:var(--muted)">
     不能嵌入播放的影片會被記下來，下次貼同一支會直接擋掉。
     如果那支影片後來開放了，可以清除這份名單。
   </p>
@@ -523,10 +519,11 @@ for (const k of ['ktv.apiKey', 'ktv.searchCache', 'ktv.quota', 'ktv.addKtv']) {
 }
 const HISTORY_MAX = 100;
 const META_MAX = 300;
-// 直接雙擊 index.html（file://）開的網頁不會送 Referer，YouTube 會拒絕播放每一支影片（錯誤 153）。
-// 要用 start.cmd 開，網址固定是這個（埠號和 start.ps1 一致）。
+// 直接雙擊 index.html（file://）開的網頁不會送 Referer，YouTube 會拒絕播放每一支影片（錯誤 153），
+// 要用 GitHub Pages 的 https 網址開。把網址填在這裡，雙擊 index.html 就會自動換過去。
+const SITE_URL = '';   // 例如 'https://帳號.github.io/儲存庫名稱/'
 const FILE_MODE = location.protocol === 'file:';
-const LOCAL_URL = 'http://localhost:8766/';
+if (FILE_MODE && SITE_URL) location.replace(SITE_URL);
 
 const state = {
   queue: LS.get(K.queue, []),
@@ -1296,15 +1293,15 @@ function renderIdle() {
   idle.classList.remove('hidden');
   idle.replaceChildren();
   if (FILE_MODE) {
+    if (SITE_URL) { idle.append(el('div', { text: '正在打開 KTV…' })); return; }
     idle.append(
-      el('div', { text: '請用 start.cmd 開啟' }),
+      el('div', { text: '請用 GitHub Pages 的網址打開' }),
       el('div', { class: 'idleNote' },
-        '直接雙擊 index.html 開的網頁，瀏覽器不會告訴 YouTube 影片放在哪個網頁，',
-        'YouTube 就會拒絕播放（錯誤 153）。',
+        '直接雙擊 index.html 開的網頁，YouTube 會拒絕播放（錯誤 153）。',
+        '放上 GitHub Pages 後，用那個 https 網址打開就能正常播放。',
         el('br'),
-        '請雙擊同一個資料夾裡的 ', el('code', { text: 'start.cmd' }),
-        '，它會用 ', el('code', { text: LOCAL_URL }), ' 開啟這個頁面。',
-        '新網址的待唱清單和設定會從空的開始。'),
+        '把網址填進 index.html 裡的 ', el('code', { text: 'SITE_URL' }),
+        '，以後雙擊 index.html 就會自動跳過去。'),
     );
     return;
   }
