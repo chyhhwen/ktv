@@ -366,21 +366,22 @@
 
   <aside>
     <form id="searchForm" autocomplete="off">
-      <input id="q" type="text" placeholder="貼上 YouTube 影片連結">
+      <input id="q" type="text" placeholder="搜尋歌名，或貼上 YouTube 連結">
       <button type="submit" class="primary">點歌</button>
       <button type="button" id="btnInsert" class="ghost" title="排到下一首">插播</button>
     </form>
     <div id="hint">
-      在 YouTube 找到歌、複製網址貼上來。
-      打歌名按 Enter，會在新分頁幫你開 YouTube 搜尋。
+      打歌名按 Enter 搜尋，也可以直接貼 YouTube 連結。
       按「原唱」切到伴唱會自動找伴唱版；點清單裡的歌名可以換一支，或改歌詞。
     </div>
     <div class="tabs">
       <button data-tab="queue" class="on">待唱 <span id="qCount"></span></button>
       <button data-tab="history">唱過</button>
+      <button data-tab="search">搜尋</button>
     </div>
     <div id="pane-queue" class="pane on"></div>
     <div id="pane-history" class="pane"></div>
+    <div id="pane-search" class="pane"></div>
   </aside>
 </main>
 
@@ -526,7 +527,10 @@ const HISTORY_MAX = 100;
 const META_MAX = 300;
 // 直接雙擊 index.html（file://）開的網頁不會送 Referer，YouTube 會拒絕播放每一支影片（錯誤 153），
 // 要用 GitHub Pages 的 https 網址開。把網址填在這裡，雙擊 index.html 就會自動換過去。
-const SITE_URL = '';   // 例如 'https://帳號.github.io/儲存庫名稱/'
+const SITE_URL = 'https://chyhhwen.github.io/ktv/';   // 例如 'https://帳號.github.io/儲存庫名稱/'
+// GitHub Pages 上沒有 server.js，搜尋改走自己部署的 Cloudflare Worker（worker/ktv-search.js，部署方式見 README）。
+// 部署好之後把 Worker 的網址填在這裡；用 start.cmd 開的時候用不到。
+const SEARCH_RELAY = '';   // 例如 'https://ktv-search.帳號.workers.dev/'
 const FILE_MODE = location.protocol === 'file:';
 if (FILE_MODE && SITE_URL) location.replace(SITE_URL);
 
@@ -797,21 +801,26 @@ function nudgeLyrics(d) {
 setInterval(tickLyrics, 100);
 
 // =====================================================================
-// YouTube 搜尋：瀏覽器不能直接呼叫 YouTube 的搜尋，要經過 server.js 轉送（start.cmd 會開它）
+// YouTube 搜尋：瀏覽器不能直接呼叫 YouTube 的搜尋，要經過轉送：
+// 用 start.cmd 開的話是本機的 server.js，放在 GitHub Pages 的話是 SEARCH_RELAY 的 Cloudflare Worker
 // =====================================================================
 const YT_CLIENT = { clientName: 'WEB', clientVersion: '2.20251120.01.00', hl: 'zh-TW', gl: 'TW' };
-let ytSearchOK = null;       // false：這個伺服器不會轉送（例如用 python -m http.server 開的）
-const ytCache = new Map();   // 關鍵字 → 結果；開著的時候同樣的關鍵字不重複搜尋
+let ytSearchOK = null;           // false：找不到能轉送的地方（例如用 python -m http.server 開的）
+let ytRelay = 'api/yt/search';   // 搜尋要送去哪裡：本機的 server.js，或 SEARCH_RELAY
+let ytProbing = null;            // 開網頁時找轉送的 Promise；搜尋前先等它找完
+const ytCache = new Map();       // 關鍵字 → 結果；開著的時候同樣的關鍵字不重複搜尋
 
-// 失敗時丟出的錯誤訊息：'nosearch'（伺服器不會轉送）、'offline'（連不上伺服器）、'HTTP 狀態碼'
+// 失敗時丟出的錯誤訊息：'nosearch'（沒地方轉送）、'offline'（連不上轉送的地方）、'HTTP 狀態碼'
 async function ytSearch(query) {
   const q = query.trim();
   if (ytCache.has(q)) return ytCache.get(q);
+  if (ytProbing) await ytProbing;
   if (ytSearchOK === false) throw new Error('nosearch');
   let r;
   try {
-    r = await fetch('api/yt/search', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+    r = await fetch(ytRelay, {
+      // 用 text/plain：跨網域呼叫 Worker 時就不用先多送一次 OPTIONS
+      method: 'POST', headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify({ context: { client: YT_CLIENT }, query: q }),
     });
   } catch { throw new Error('offline'); }
@@ -857,6 +866,50 @@ async function oembed(id) {
   } catch { return { status: 0, data: null }; }   // 連不上就先當作能播，交給播放器判斷
 }
 async function playable(id) { return !NO_EMBED.includes((await oembed(id)).status); }
+
+// 開網頁時找能轉送搜尋的地方：先問本機的 server.js，沒有再問 SEARCH_RELAY。
+// 決定點歌框要搜尋，還是只收連結
+async function probeSearch() {
+  const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+  const places = FILE_MODE ? [] : [local && 'api/yt/search', SEARCH_RELAY].filter(Boolean);
+  let found = null, retry = null;
+  for (const url of places) {
+    try {
+      if ((await fetch(url)).headers.get('X-KTV-Relay')) { found = url; break; }
+    } catch { retry = retry || url; }
+  }
+  if (found) { ytRelay = found; ytSearchOK = true; }
+  else if (retry) { ytRelay = retry; ytSearchOK = null; }   // 連不上：先當作不知道，真的搜尋時再試它
+  else ytSearchOK = false;
+  applySearchAvailability();
+}
+function applySearchAvailability() {
+  const can = ytSearchOK !== false;
+  $('#q').placeholder = can ? '搜尋歌名，或貼上 YouTube 連結' : '貼上 YouTube 影片連結';
+  $('#hint').textContent = can
+    ? '打歌名按 Enter 搜尋，也可以直接貼 YouTube 連結。按「原唱」切到伴唱會自動找伴唱版；點清單裡的歌名可以換一支，或改歌詞。'
+    : '在 YouTube 找到歌、複製網址貼上來；打歌名按 Enter，會在新分頁幫你開 YouTube 搜尋。點清單裡的歌名可以貼伴唱版連結，或改歌詞。';
+  $('.tabs [data-tab="search"]').hidden = !can;
+  renderIdle();
+}
+
+// 搜尋失敗時的說明；what 是要找的東西（「歌」或「伴唱版」）
+function searchErrorView(err, q, what) {
+  const msg = (text) => el('div', { class: 'msg', text });
+  if (err === 'nosearch') return [
+    msg('現在這個網址開的 KTV 不能搜尋 YouTube。用 start.cmd 開（電腦要有 Node.js），就能直接在這裡搜尋。'),
+    el('div', { class: 'msg' }, `也可以到 YouTube 找好${what}，把連結貼在上面的框框。 `,
+      el('button', {
+        class: 'small', text: '到 YouTube 找', onclick: () => window.open(ytResultsUrl(q), '_blank', 'noopener'),
+      })),
+  ];
+  if (err === 'offline') {
+    return [msg(ytRelay === SEARCH_RELAY
+      ? '連不上搜尋服務（Cloudflare Worker），等一下再試，或直接貼上 YouTube 連結。'
+      : '連不上 KTV 的伺服器。如果把黑色視窗關掉了，重新執行 start.cmd。')];
+  }
+  return [msg(`YouTube 搜尋失敗（${err}），等一下再試，或直接貼上 YouTube 連結。`)];
+}
 
 // =====================================================================
 // 伴唱版：用歌名到 YouTube 找 KTV／伴奏版，從標題挑最像的一支
@@ -1001,7 +1054,7 @@ async function karaokeNow(item) {
   try { await findKaraoke(item); }
   catch (e) {
     toast(e.message === 'nosearch' ? '這首還沒有伴唱版，按歌詞旁的「⋯」可以貼連結'
-      : e.message === 'offline' ? '連不上 KTV 的伺服器，沒辦法找伴唱版'
+      : e.message === 'offline' ? '連不上搜尋服務，沒辦法找伴唱版'
       : '搜尋伴唱版失敗，等一下再試');
     return;
   }
@@ -1131,7 +1184,7 @@ function moveQueue(i, to) {
 }
 function removeQueue(i) { state.queue.splice(i, 1); save(); render(); }
 
-// ---------- 貼連結 ----------
+// ---------- 點歌：貼連結，或打歌名搜尋 ----------
 function submitLink(front) {
   const raw = $('#q').value;
   const id = parseVideoId(raw);
@@ -1143,9 +1196,41 @@ function submitLink(front) {
   }
   const q = raw.trim();
   if (!q) { $('#q').focus(); return; }
+  if (ytSearchOK !== false) { songSearch(q); return; }
+  // 這個伺服器不能搜尋：在新分頁幫你開 YouTube 搜尋
   window.open(ytResultsUrl(q), '_blank', 'noopener');
   $('#q').select();
   toast('這不是 YouTube 連結，已在新分頁幫你搜尋');
+}
+
+const sr = { q: '', state: 'idle', list: [], err: '' };   // 點歌的搜尋結果：idle / loading / done / error
+
+async function songSearch(q) {
+  Object.assign(sr, { q, state: 'loading', list: [], err: '' });
+  showTab('search');
+  renderSearch();
+  try {
+    const list = await ytSearch(q);
+    if (sr.q !== q) return;   // 等的時候又搜了別的
+    Object.assign(sr, { state: 'done', list });
+  } catch (e) {
+    if (sr.q !== q) return;
+    Object.assign(sr, { state: 'error', err: e.message });
+  }
+  renderSearch();
+}
+
+// 從搜尋結果點歌：先確認能嵌入播放，不能的話現在就擋下，免得輪到了才被跳過
+async function addFromResult(c, front, btn) {
+  btn.disabled = true;
+  const ok = await playable(c.videoId);
+  btn.disabled = false;
+  if (!ok) {
+    state.blocked.add(c.videoId); save(); renderSearch();
+    toast('這支不允許在其他網站播放，換一支吧');
+    return;
+  }
+  addSong({ videoId: c.videoId, title: c.title, channel: c.channel }, front);
 }
 
 // =====================================================================
@@ -1188,7 +1273,7 @@ function renderSdKaraoke() {
   const list = $('#sdKList');
   const msg = (text) => el('div', { class: 'msg', text });
   if (sdK.state === 'loading') list.replaceChildren(msg('搜尋中…'));
-  else if (sdK.state === 'error') list.replaceChildren(...sdKErrorView(sdK.err));
+  else if (sdK.state === 'error') list.replaceChildren(...searchErrorView(sdK.err, $('#sdKQ').value, '伴唱版'));
   else if (sdK.state === 'done' && !sdK.list.length) list.replaceChildren(msg('找不到。換個關鍵字試試。'));
   else list.replaceChildren(...sdK.list.map((c) => {
     const using = m.karaoke === c.videoId;
@@ -1205,20 +1290,6 @@ function renderSdKaraoke() {
       }),
     );
   }));
-}
-
-function sdKErrorView(err) {
-  const msg = (text) => el('div', { class: 'msg', text });
-  if (err === 'nosearch') return [
-    msg('現在這個網址開的 KTV 不能搜尋 YouTube。用 start.cmd 開（電腦要有 Node.js），就能直接在這裡挑伴唱版。'),
-    el('div', { class: 'msg' }, '也可以到 YouTube 找好伴唱版，把連結貼在上面的框框。 ',
-      el('button', {
-        class: 'small', text: '到 YouTube 找',
-        onclick: () => window.open(ytResultsUrl($('#sdKQ').value), '_blank', 'noopener'),
-      })),
-  ];
-  if (err === 'offline') return [msg('連不上 KTV 的伺服器。如果把黑色視窗關掉了，重新執行 start.cmd。')];
-  return [msg(`YouTube 搜尋失敗（${err}），等一下再試，或直接貼上 YouTube 連結。`)];
 }
 
 async function sdKSearch(raw) {
@@ -1583,6 +1654,41 @@ function renderHistory() {
   }
 }
 
+function renderSearch() {
+  const pane = $('#pane-search');
+  const msg = (text) => el('div', { class: 'msg', text });
+  if (sr.state === 'idle') pane.replaceChildren(msg('在上面的框框打歌名按 Enter，搜尋結果會列在這裡。'));
+  else if (sr.state === 'loading') pane.replaceChildren(msg(`搜尋「${sr.q}」中…`));
+  else if (sr.state === 'error') pane.replaceChildren(...searchErrorView(sr.err, sr.q, '歌'));
+  else if (!sr.list.length) pane.replaceChildren(msg(`找不到「${sr.q}」，換個關鍵字試試。`));
+  else {
+    const queued = new Set([state.current, ...state.queue].filter(Boolean).map((x) => x.videoId));
+    pane.replaceChildren(
+      el('div', { class: 'paneHead', text: `「${sr.q}」的搜尋結果` }),
+      ...sr.list.map((c) => resultRow(c, queued.has(c.videoId))),
+    );
+  }
+}
+
+function resultRow(c, queued) {
+  const blocked = state.blocked.has(c.videoId);
+  const add = (front) => (e) => addFromResult(c, front, e.currentTarget);
+  return el('div', { class: 'row' },
+    el('img', { src: thumbOf(c.videoId), alt: '', loading: 'lazy' }),
+    el('div', { class: 'info' },
+      el('div', { class: 't', text: c.title }),
+      el('div', { class: 'c' }, `${c.channel} · ${fmtDur(c.seconds)}`,
+        looksKaraoke(c.title) ? el('span', { class: 'badge', text: '伴奏版' }) : null,
+        queued ? el('span', { class: 'badge', text: '已點' }) : null,
+        blocked ? el('span', { class: 'tag', text: '　無法嵌入' }) : null),
+    ),
+    el('div', { class: 'acts' },
+      el('button', { class: 'small primary', text: '點歌', disabled: blocked, onclick: add(false) }),
+      el('button', { class: 'small', text: '插播', title: '排到下一首', disabled: blocked, onclick: add(true) }),
+    ),
+  );
+}
+
 function renderIdle() {
   const idle = $('#idle');
   if (state.current) { idle.classList.add('hidden'); return; }
@@ -1607,7 +1713,7 @@ function renderIdle() {
   } else if (state.queue.length) {
     idle.append(el('button', { class: 'primary', text: `開始唱（${state.queue.length} 首待唱）`, onclick: playNext }));
   } else if (!stopNote) {
-    idle.append(el('div', { text: '貼一首歌的連結，開始唱吧 🎤' }));
+    idle.append(el('div', { text: ytSearchOK === false ? '貼一首歌的連結，開始唱吧 🎤' : '搜尋一首歌，開始唱吧 🎤' }));
   }
 }
 
@@ -1615,6 +1721,7 @@ function render() {
   renderIdle();
   renderQueue();
   renderHistory();
+  renderSearch();
   drawLyrics();
   $('#qCount').textContent = state.queue.length ? `(${state.queue.length})` : '';
   $('#nowTitle').textContent = state.current ? state.current.title : '尚未播放';
@@ -1846,6 +1953,7 @@ $('#sdLrcClear').addEventListener('click', () => {
 
 save();
 render();
+ytProbing = probeSearch();
 </script>
 <script src="https://www.youtube.com/iframe_api"
   onerror="playerFailed = true; render();"></script>

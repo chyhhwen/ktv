@@ -30,6 +30,7 @@ function send(res, status, body = '', headers = {}) {
 // X-KTV-Relay 讓網頁知道這個伺服器會轉送；用別的伺服器開的話就沒有這個標頭。
 async function relaySearch(req, res) {
   const h = { 'Content-Type': 'application/json; charset=utf-8', 'X-KTV-Relay': '1' };
+  if (req.method === 'GET') return send(res, 200, '{"relay":true}', h);   // 網頁開啟時用來確認能不能搜尋
   if (req.method !== 'POST') return send(res, 405, '{}', h);
   const chunks = [];
   let size = 0;

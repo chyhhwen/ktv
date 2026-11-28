@@ -2,7 +2,7 @@
 
 唱爽了
 
-開在瀏覽器裡的 KTV。貼上 YouTube 連結就能點歌，播放時自動找同步歌詞；按「伴唱」會自動找這首的伴奏版，一鍵切換原唱／伴唱；還能接麥克風，加回音和殘響，戴耳機聽自己唱。
+開在瀏覽器裡的 KTV。打歌名搜尋就能點歌（也可以貼 YouTube 連結），播放時自動找同步歌詞；按「伴唱」會自動找這首的伴奏版，一鍵切換原唱／伴唱；還能接麥克風，加回音和殘響，戴耳機聽自己唱。
 
 整個程式就是一個 `index.html`，加上幫它轉送 YouTube 搜尋的小伺服器 `server.js`。不用登入，也不需要 YouTube API 金鑰。
 
@@ -10,7 +10,7 @@
 
 要透過本機網頁伺服器，用 **http://localhost:8766/** 開啟。直接雙擊 `index.html`（`file://`）開的網頁不會送出 Referer，YouTube 會拒絕播放每一首歌（錯誤 153）。
 
-Windows 直接雙擊資料夾裡的 `start.cmd` 就好：它會用電腦上的 Node.js 開伺服器（`server.js`），再自動打開瀏覽器。唱完把那個黑色視窗關掉即可。沒有 Node.js 的話會改用 Python，歌一樣能唱，只是伴唱版不會自動找，要自己貼連結。
+Windows 直接雙擊資料夾裡的 `start.cmd` 就好：它會用電腦上的 Node.js 開伺服器（`server.js`），再自動打開瀏覽器。唱完把那個黑色視窗關掉即可。沒有 Node.js 的話會改用 Python，歌一樣能唱，只是不能在 KTV 裡搜尋，點歌和伴唱版都要自己貼連結。
 
 其他系統，或想自己開的話，在這個資料夾裡執行其中一個指令，再用瀏覽器打開 http://localhost:8766/ 。
 
@@ -20,28 +20,43 @@ Windows 直接雙擊資料夾裡的 `start.cmd` 就好：它會用電腦上的 N
 node server.js
 ```
 
-只有 Python（伴唱版要自己貼連結）：
+只有 Python（點歌和伴唱版都要自己貼連結）：
 
 ```
 python -m http.server 8766
 ```
 
-`server.js` 除了放出網頁，還會幫網頁轉送 YouTube 搜尋：瀏覽器不能直接呼叫 YouTube 的搜尋，自動找伴唱版就是靠它。它只接受從 localhost 打開的網頁。
+`server.js` 除了放出網頁，還會幫網頁轉送 YouTube 搜尋：瀏覽器不能直接呼叫 YouTube 的搜尋，搜尋點歌、自動找伴唱版都是靠它。它只接受從 localhost 打開的網頁。放在 GitHub Pages 這類靜態網站上一樣能唱，但那裡沒有 `server.js`，要搜尋得另外部署一個 Cloudflare Worker，見下面「在 GitHub Pages 上搜尋」；沒部署的話跟只有 Python 時一樣要貼連結。
 
 - 待唱清單和設定存在瀏覽器裡，而且跟網址綁在一起：換了埠號或換瀏覽器都會從空的開始，所以請固定用同一個網址。
 - 請用 `localhost` 開。用區網 IP（例如 `http://192.168.x.x:8766`）開的話，瀏覽器不會讓網頁使用麥克風。
 - 要指定麥克風的監聽輸出，請用 Chrome 或 Edge。
 
+## 在 GitHub Pages 上搜尋
+
+GitHub Pages 只放靜態檔案，沒有 `server.js` 幫忙轉送搜尋，所以要另外在 Cloudflare 放一個小程式（Worker）做同樣的事，程式在 [`worker/ktv-search.js`](worker/ktv-search.js)。Cloudflare 免費方案的額度，唱 KTV 用綽綽有餘。
+
+1. 到 [Cloudflare 主控台](https://dash.cloudflare.com) 登入，沒有帳號就免費註冊一個。
+2. 部署 Worker，兩種方式選一種：
+   - **在網頁上貼**：進「Workers & Pages」，建立一個新的 Worker（從 Hello World 範本開始就好），名字取 `ktv-search`，先部署；再打開它的程式碼編輯器，把 `worker/ktv-search.js` 的內容整個貼上取代，再部署一次。
+   - **用指令**：在 `worker` 資料夾裡執行 `npx wrangler login`（會開瀏覽器讓你授權），再執行 `npx wrangler deploy`。
+3. 部署好會拿到 Worker 的網址，像 `https://ktv-search.你的子網域.workers.dev/`。把它填進 `index.html` 的 `SEARCH_RELAY`，推上 GitHub。
+4. 打開 GitHub Pages 的網址，搜一首歌試試。
+
+- Worker 只回應 `ALLOWED_ORIGINS` 裡的網站（預設 `https://chyhhwen.github.io`）和 localhost，別的網站的網頁拿不到結果。換了網址（例如 fork 到別的帳號）記得改。
+- 用 `start.cmd` 開的時候還是走本機的 `server.js`，用不到 Worker。
+- 有個風險要先知道：Worker 是從 Cloudflare 的機房連 YouTube，YouTube 有可能擋機房的 IP。要是搜尋一直顯示「YouTube 搜尋失敗」，就只能用 `start.cmd` 開，或貼連結。
+
 ## 怎麼唱
 
-1. 在 YouTube 找到歌，複製網址，貼到輸入框按「點歌」。目前沒在播的話，會直接開始唱。
+1. 在輸入框打歌名按 Enter，從「搜尋」分頁的結果按「點歌」（或「插播」排到下一首）；也可以直接貼 YouTube 連結。目前沒在播的話，會直接開始唱。
 2. 想唱伴唱版就按「原唱」鍵切到「伴唱」，會自動到 YouTube 找這首的伴奏版接著播。找的不滿意，點清單裡的歌名（正在唱的歌也可以按歌詞旁的「⋯」），從搜尋結果挑別支，或改歌詞。
 3. 要用麥克風：按右上角「音訊」→「開啟麥克風」，允許瀏覽器使用麥克風，再選好麥克風和監聽耳機。
 4. 重新整理之後，剛剛在唱的歌會放回待唱第一首，按影片區的「開始唱」繼續（瀏覽器不讓網頁沒被點過就自己出聲）。
 
 ## 功能
 
-- **點歌**：支援 `youtube.com/watch`、`youtu.be`、Shorts、YouTube Music 等影片網址。「插播」會把歌排到下一首。輸入的不是連結（例如歌名）時，會在新分頁幫你開 YouTube 搜尋。
+- **點歌**：打歌名按 Enter，YouTube 的搜尋結果會列在「搜尋」分頁：伴奏影片標「伴奏版」，已經點過的標「已點」，不允許嵌入的影片點的時候就會擋下。也可以直接貼 `youtube.com/watch`、`youtu.be`、Shorts、YouTube Music 等影片網址。「插播」會把歌排到下一首。沒有用 `server.js` 開的話，打歌名會在新分頁幫你開 YouTube 搜尋。
 - **待唱清單**：可以置頂、上移、下移、刪除、清空。唱過的歌會留在「唱過」分頁（最多 100 首），按「再點」就能再唱一次。
 - **同步歌詞**：歌開始播的時候，會從影片標題猜歌名和歌手，到 [LRCLIB](https://lrclib.net) 找有時間軸的歌詞，挑長度最接近影片的那份。找不到或找錯了，可以自己換關鍵字搜尋，或手動貼上 LRC 歌詞。
 - **歌詞微調**：歌詞跑太快按「延後」，跑太慢按「提前」，每次 0.5 秒，每支影片分開記。
@@ -73,10 +88,11 @@ python -m http.server 8766
 
 ## 用到的外部服務
 
-都不需要金鑰或帳號：
+都不需要金鑰或帳號（只有選用的 Cloudflare Worker 要註冊 Cloudflare）：
 
 - [YouTube IFrame Player API](https://developers.google.com/youtube/iframe_api_reference)、oEmbed：播放影片、讀取標題和縮圖，也用來確認影片能不能嵌入
-- YouTube 搜尋：找伴唱版，由 `server.js` 在本機轉送（和 youtube.com 網頁版用的是同一個搜尋，不是官方公開的 API，哪天 YouTube 改了格式可能要跟著修）
+- YouTube 搜尋：點歌搜尋、找伴唱版，由本機的 `server.js` 或你部署的 Cloudflare Worker 轉送（和 youtube.com 網頁版用的是同一個搜尋，不是官方公開的 API，哪天 YouTube 改了格式可能要跟著修）
+- [Cloudflare Workers](https://workers.cloudflare.com)：選用，讓 GitHub Pages 版也能搜尋
 - [LRCLIB](https://lrclib.net)：搜尋同步歌詞
 
 ## 授權

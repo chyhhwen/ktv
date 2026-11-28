@@ -1,0 +1,4 @@
+# 用 Cloudflare 的 wrangler 指令部署 ktv-search.js（在這個資料夾裡執行 npx wrangler deploy）
+name = "ktv-search"
+main = "ktv-search.js"
+compatibility_date = "2025-11-01"
